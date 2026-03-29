@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust WebSocket Chat</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --bg-color: #f4f7f6;
+            --chat-bg: #ffffff;
+            --text-color: #333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 500px;
+            background: var(--chat-bg);
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        #chat-window {
+            height: 400px;
+            overflow-y: auto;
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            padding: 8px 12px;
+            border-radius: 8px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+
+        .message.system {
+            align-self: center;
+            background: #e0e0e0;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .message.user {
+            align-self: flex-start;
+            background: #f1f1f1;
+            color: var(--text-color);
+        }
+
+        .message.mine {
+            align-self: flex-end;
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .input-area {
+            display: flex;
+            padding: 15px;
+            gap: 10px;
+            background: #fff;
+        }
+
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            outline: none;
+        }
+
+        input:focus { border-color: var(--primary-color); }
+
+        button {
+            padding: 10px 20px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button:hover:not(:disabled) { opacity: 0.9; }
+
+        .login-overlay {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header"> Rust Chat Realtime</div>
+
+    <div id="login-screen" class="login-overlay">
+        <input type="text" id="username" placeholder="Nhập tên của bạn..." maxlength="20">
+        <button onclick="connect()">Kết nối</button>
+    </div>
+
+    <div id="chat-screen" class="hidden">
+        <div id="chat-window"></div>
+        <div class="input-area">
+            <input type="text" id="message-input" placeholder="Nhập tin nhắn..." onkeypress="handleKeyPress(event)">
+            <button id="send-btn" onclick="sendMessage()">Gửi</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let ws;
+    let myUsername = "";
+
+    const loginScreen = document.getElementById('login-screen');
+    const chatScreen = document.getElementById('chat-screen');
+    const chatWindow = document.getElementById('chat-window');
+    const messageInput = document.getElementById('message-input');
+
+    function connect() {
+        myUsername = document.getElementById('username').value.trim();
+        if (!myUsername) return alert("Vui lòng nhập tên!");
+
+        ws = new WebSocket("ws://127.0.0.1:3000/ws");
+
+        ws.onopen = () => {
+            loginScreen.classList.add('hidden');
+            chatScreen.classList.remove('hidden');
+            addMessage("Hệ thống", "Đã kết nối thành công!", "system");
+
+            ws.send(JSON.stringify({
+                username: myUsername,
+                content: "đã tham gia phòng chat"
+            }));
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                const type = data.username === myUsername ? "mine" : "user";
+                addMessage(data.username, data.content, type);
+            } catch (e) {
+                console.error("Lỗi parse JSON:", e);
+            }
+        };
+
+        ws.onclose = () => {
+            addMessage("Hệ thống", "Mất kết nối tới server.", "system");
+            document.getElementById('send-btn').disabled = true;
+        };
+
+        ws.onerror = () => {
+            alert("Không thể kết nối tới server Rust!");
+        };
+    }
+
+    function sendMessage() {
+        const content = messageInput.value.trim();
+        if (!content || !ws) return;
+
+        const msg = {
+            username: myUsername,
+            content: content
+        };
+
+        ws.send(JSON.stringify(msg));
+        messageInput.value = "";
+    }
+
+    function handleKeyPress(e) {
+        if (e.key === 'Enter') sendMessage();
+    }
+
+    function addMessage(user, text, type) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${type}`;
+        
+        if (type === "system") {
+            msgDiv.textContent = text;
+        } else {
+            msgDiv.innerHTML = `<strong>${user}:</strong> ${text}`;
+        }
+
+        chatWindow.appendChild(msgDiv);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
