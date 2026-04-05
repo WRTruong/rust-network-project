@@ -7,62 +7,99 @@ use crate::chat::message::ChatMessage;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::broadcast::Sender;
 
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(broadcast_tx): State<Sender<ChatMessage>>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, broadcast_tx))
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone)]
+pub struct AppState {
+    pub tx: Sender<ChatMessage>,
+    pub history: Arc<Mutex<Vec<ChatMessage>>>,
 }
 
-async fn handle_socket(socket: WebSocket, broadcast_tx: Sender<ChatMessage>) {
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(socket: WebSocket, state: AppState) {
     println!("Client connected");
     let (mut sender, mut receiver) = socket.split();
-    let mut broadcast_rx = broadcast_tx.subscribe();
+    let mut rx = state.tx.subscribe();
+
+    let mut username: Option<String> = None;
+
+    {
+        let history = {
+            state.history.lock().unwrap().clone()
+        };
+        for msg in history {
+            let json = serde_json::to_string(&msg).unwrap();
+            let _ = sender.send(Message::Text(json.into())).await;
+        }
+    }
 
     loop {
         tokio::select! {
             incoming = receiver.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
-                        match serde_json::from_str::<ChatMessage>(&text) {
-                            Ok(chat_message) => {
-                                println!(
-                                    "Received from {}: {}",
-                                    chat_message.username, chat_message.content
-                                );
+                        if let Ok(mut msg) = serde_json::from_str::<ChatMessage>(&text) {
+                            if msg.content == "__join__" {
+                                username = Some(msg.username.clone());
 
-                                let _ = broadcast_tx.send(chat_message);
+                                let join_msg = ChatMessage {
+                                    username: "SYSTEM".to_string(),
+                                    content: format!("{} đã tham gia", msg.username),
+                                };
+
+                                let _ = state.tx.send(join_msg.clone());
+                                {
+                                    state.history.lock().unwrap().push(join_msg);
+                                }
+                                
                             }
-                            Err(error) => {
-                                eprintln!("Invalid chat message: {}", error);
+
+                            if msg.content != "__join__"{
+                                if let Some(ref u) = username {
+                                    msg.username = u.clone();
+                                    {
+                                    state.history.lock().unwrap().push(msg.clone());
+                                    }       
+                                    let _ = state.tx.send(msg);
+                                }
                             }
                         }
                     }
+
                     Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(_)) => {}
-                    Some(Err(error)) => {
-                        eprintln!("WebSocket receive error: {}", error);
-                        break;
-                    }
+                    _ => {}
                 }
             }
-            outgoing = broadcast_rx.recv() => {
-                match outgoing {
-                    Ok(chat_message) => {
-                        let response = serde_json::to_string(&chat_message)
-                            .expect("chat message should serialize");
 
-                        if sender.send(Message::Text(response.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        eprintln!("Broadcast receive error: {}", error);
+
+            outgoing = rx.recv() => {
+                if let Ok(msg) = outgoing {
+                    
+
+                    let json = serde_json::to_string(&msg).unwrap();
+
+                    if sender.send(Message::Text(json.into())).await.is_err() {
                         break;
                     }
                 }
             }
         }
+    }
+
+    if let Some(u) = username {
+        let leave_msg = ChatMessage {
+            username: "SYSTEM".to_string(),
+            content: format!("{} đã rời chat", u),
+        };
+
+        let _ = state.tx.send(leave_msg.clone());
+        state.history.lock().unwrap().push(leave_msg);
     }
 
     println!("Client disconnected");

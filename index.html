@@ -155,17 +155,21 @@
         ws.onopen = () => {
             loginScreen.classList.add('hidden');
             chatScreen.classList.remove('hidden');
-            addMessage("Hệ thống", "Đã kết nối thành công!", "system");
-
+            addMessage("", "Đã kết nối thành công!", "system");
+            
             ws.send(JSON.stringify({
-                username: myUsername,
-                content: "đã tham gia phòng chat"
+            username: myUsername,
+            content: "__join__"
             }));
         };
 
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
+                if (data.username === "SYSTEM") {
+                    addMessage("", data.content, "system");
+                    return;
+                }
                 const type = data.username === myUsername ? "mine" : "user";
                 addMessage(data.username, data.content, type);
             } catch (e) {
@@ -174,7 +178,7 @@
         };
 
         ws.onclose = () => {
-            addMessage("Hệ thống", "Mất kết nối tới server.", "system");
+            addMessage("SYSTEM", "Mất kết nối tới server.", "system");
             document.getElementById('send-btn').disabled = true;
         };
 
@@ -187,12 +191,10 @@
         const content = messageInput.value.trim();
         if (!content || !ws) return;
 
-        const msg = {
-            username: myUsername,
-            content: content
-        };
-
-        ws.send(JSON.stringify(msg));
+        ws.send(JSON.stringify({
+        username: myUsername,
+        content: content
+        }));
         messageInput.value = "";
     }
 
