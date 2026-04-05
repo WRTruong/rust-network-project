@@ -54,7 +54,7 @@ pub async fn start_client() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
 
-        let message = ChatMessage {
+        let message: ChatMessage = ChatMessage {
             username: username.clone(),
             content,
         };
