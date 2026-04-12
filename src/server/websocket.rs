@@ -1,18 +1,16 @@
 use axum::{
-    extract::State,
-    extract::ws::{WebSocketUpgrade, WebSocket, Message},
+    extract::{State, ws::{WebSocketUpgrade, WebSocket, Message}},
     response::IntoResponse,
 };
 use crate::chat::message::ChatMessage;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::broadcast::Sender;
-
-use std::sync::{Arc, Mutex};
+use tokio::sync::{broadcast, Mutex};
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub tx: Sender<ChatMessage>,
-    pub history: Arc<Mutex<Vec<ChatMessage>>>,
+    pub tx: broadcast::Sender<ChatMessage>,
+    pub rooms: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
 }
 
 pub async fn ws_handler(
@@ -24,50 +22,94 @@ pub async fn ws_handler(
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
     println!("Client connected");
+
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.tx.subscribe();
 
-    let mut username: Option<String> = None;
-
-    {
-        let history = {
-            state.history.lock().unwrap().clone()
-        };
-        for msg in history {
-            let json = serde_json::to_string(&msg).unwrap();
-            let _ = sender.send(Message::Text(json.into())).await;
-        }
-    }
+    let mut username = String::new();
+    let mut joined_rooms: Vec<String> = vec![];
 
     loop {
         tokio::select! {
             incoming = receiver.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
-                        if let Ok(mut msg) = serde_json::from_str::<ChatMessage>(&text) {
-                            if msg.content == "__join__" {
-                                username = Some(msg.username.clone());
+                        if let Ok(msg) = serde_json::from_str::<ChatMessage>(&text) {
+                            match msg.msg_type.as_str() {
 
-                                let join_msg = ChatMessage {
-                                    username: "SYSTEM".to_string(),
-                                    content: format!("{} đã tham gia", msg.username),
-                                };
+                                "join" => {
+                                    username = msg.username.clone();
+                                    let room = msg.room.clone();
 
-                                let _ = state.tx.send(join_msg.clone());
-                                {
-                                    state.history.lock().unwrap().push(join_msg);
+                                    if !joined_rooms.contains(&room) {
+                                        joined_rooms.push(room.clone());
+                                    }
+
+                                    let rooms = state.rooms.lock().await;
+                                    if let Some(history) = rooms.get(&room) {
+                                        for old_msg in history {
+                                            if let Ok(json) = serde_json::to_string(old_msg) {
+                                                let _ = sender.send(Message::Text(json)).await;
+                                            }
+                                        }
+                                    }
+                                    drop(rooms);
+
+                                    let join_msg = ChatMessage {
+                                        msg_type: "system".into(),
+                                        username: "SYSTEM".into(),
+                                        content: format!("{} joined the room", username),
+                                        room,
+                                    };
+
+                                    let _ = state.tx.send(join_msg);
                                 }
-                                
-                            }
 
-                            if msg.content != "__join__"{
-                                if let Some(ref u) = username {
-                                    msg.username = u.clone();
-                                    {
-                                    state.history.lock().unwrap().push(msg.clone());
-                                    }       
-                                    let _ = state.tx.send(msg);
+                                "message" => {
+                                    if joined_rooms.contains(&msg.room) {
+                                        let chat_msg = ChatMessage {
+                                            msg_type: "message".into(),
+                                            username: username.clone(),
+                                            content: msg.content.clone(),
+                                            room: msg.room.clone(),
+                                        };
+
+                                        let mut rooms = state.rooms.lock().await;
+                                        rooms.entry(msg.room.clone())
+                                            .or_insert_with(Vec::new)
+                                            .push(chat_msg.clone());
+
+                                        let _ = state.tx.send(chat_msg);
+                                    }
                                 }
+
+                                "leave" => {
+                                    joined_rooms.retain(|r| r != &msg.room);
+
+                                    let leave_msg = ChatMessage {
+                                        msg_type: "system".into(),
+                                        username: "SYSTEM".into(),
+                                        content: format!("{} left the room", username),
+                                        room: msg.room,
+                                    };
+
+                                    let _ = state.tx.send(leave_msg);
+                                }
+
+                                "typing" => {
+                                    // Broadcast typing indicator to all users in the room
+                                    if joined_rooms.contains(&msg.room) {
+                                        let typing_msg = ChatMessage {
+                                            msg_type: "typing".into(),
+                                            username: username.clone(),
+                                            content: msg.content.clone(),
+                                            room: msg.room.clone(),
+                                        };
+                                        let _ = state.tx.send(typing_msg);
+                                    }
+                                }
+
+                                _ => {}
                             }
                         }
                     }
@@ -77,29 +119,20 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 }
             }
 
-
             outgoing = rx.recv() => {
                 if let Ok(msg) = outgoing {
-                    
+                    if !joined_rooms.contains(&msg.room) {
+                        continue;
+                    }
 
-                    let json = serde_json::to_string(&msg).unwrap();
-
-                    if sender.send(Message::Text(json.into())).await.is_err() {
-                        break;
+                    if let Ok(json) = serde_json::to_string(&msg) {
+                        if sender.send(Message::Text(json)).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
         }
-    }
-
-    if let Some(u) = username {
-        let leave_msg = ChatMessage {
-            username: "SYSTEM".to_string(),
-            content: format!("{} đã rời chat", u),
-        };
-
-        let _ = state.tx.send(leave_msg.clone());
-        state.history.lock().unwrap().push(leave_msg);
     }
 
     println!("Client disconnected");
