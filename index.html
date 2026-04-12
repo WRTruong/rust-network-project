@@ -1,221 +1,537 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rust WebSocket Chat</title>
-    <style>
-        :root {
-            --primary-color: #4a90e2;
-            --bg-color: #f4f7f6;
-            --chat-bg: #ffffff;
-            --text-color: #333;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-color);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-
-        .chat-container {
-            width: 100%;
-            max-width: 500px;
-            background: var(--chat-bg);
-            border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .chat-header {
-            background: var(--primary-color);
-            color: white;
-            padding: 15px;
-            text-align: center;
-            font-weight: bold;
-            font-size: 1.2rem;
-        }
-
-        #chat-window {
-            height: 400px;
-            overflow-y: auto;
-            padding: 20px;
-            border-bottom: 1px solid #eee;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .message {
-            padding: 8px 12px;
-            border-radius: 8px;
-            max-width: 80%;
-            word-wrap: break-word;
-        }
-
-        .message.system {
-            align-self: center;
-            background: #e0e0e0;
-            font-size: 0.8rem;
-            color: #666;
-        }
-
-        .message.user {
-            align-self: flex-start;
-            background: #f1f1f1;
-            color: var(--text-color);
-        }
-
-        .message.mine {
-            align-self: flex-end;
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .input-area {
-            display: flex;
-            padding: 15px;
-            gap: 10px;
-            background: #fff;
-        }
-
-        input {
-            flex: 1;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            outline: none;
-        }
-
-        input:focus { border-color: var(--primary-color); }
-
-        button {
-            padding: 10px 20px;
-            background: var(--primary-color);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        button:hover:not(:disabled) { opacity: 0.9; }
-
-        .login-overlay {
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .hidden { display: none !important; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rust Chat Rooms</title>
+  <style>
+    :root{--bg:#edf2f7;--panel:#fff;--line:#d8e1eb;--text:#1c2430;--muted:#6a7688;--brand:#176a4d;--brand2:#0f4d38;--soft:#e5f5ee;--danger:#c62828}
+    *{box-sizing:border-box} body{margin:0;font-family:"Trebuchet MS","Segoe UI",sans-serif;color:var(--text);background:linear-gradient(135deg,#f7fafc,#e4ebf3);min-height:100vh;padding:18px}
+    .shell{max-width:1180px;min-height:92vh;margin:0 auto;background:rgba(255,255,255,.78);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.7);border-radius:26px;overflow:hidden;box-shadow:0 25px 60px rgba(20,31,51,.12)}
+    .hidden{display:none!important}
+    .login{display:grid;grid-template-columns:1fr 1fr;min-height:92vh}
+    .hero{padding:40px;background:linear-gradient(160deg,var(--brand2),var(--brand));color:#f4fbf8;display:flex;flex-direction:column;justify-content:space-between}
+    .hero h1{font-size:clamp(2.2rem,4vw,4rem);line-height:.95;margin:0 0 16px;max-width:8ch}
+    .hero p{line-height:1.7;color:rgba(244,251,248,.88)}
+    .chips{display:grid;gap:12px}.chip{padding:16px;border-radius:18px;background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.12)}
+    .panel{padding:40px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.86)}
+    .card{width:min(480px,100%);padding:30px;border-radius:22px;background:var(--panel);border:1px solid var(--line);box-shadow:0 16px 35px rgba(27,39,56,.08)}
+    .card h2{margin:0 0 10px;font-size:1.8rem}.card p{margin:0 0 20px;color:var(--muted);line-height:1.6}
+    label{display:block;margin:0 0 8px;font-weight:700} input,button{font:inherit}
+    input{width:100%;padding:14px 16px;border-radius:14px;border:1px solid var(--line);outline:none;background:#fbfcfe}
+    input:focus{border-color:rgba(23,106,77,.65);box-shadow:0 0 0 4px rgba(23,106,77,.12)}
+    button{border:none;border-radius:14px;padding:12px 16px;cursor:pointer;font-weight:700}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .primary{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+    .ghost{background:#eef4f8;color:var(--text)} .danger{background:rgba(198,40,40,.12);color:var(--danger)}
+    .error{display:none;margin-top:14px;padding:12px 14px;border-radius:14px;background:rgba(198,40,40,.1);color:#8a1d1d}.error.show{display:block}
+    .app{display:grid;grid-template-columns:320px 1fr;min-height:92vh}
+    .sidebar{background:linear-gradient(180deg,#f8fbfd,#eef4f7);border-right:1px solid var(--line);padding:20px 16px;display:flex;flex-direction:column;gap:16px}
+    .profile{display:flex;gap:12px;align-items:center}.avatar{width:44px;height:44px;border-radius:15px;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;display:grid;place-items:center;font-weight:800}
+    .profile strong{display:block}.profile span{font-size:.88rem;color:var(--muted)}
+    .section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.section-title h3{margin:0;font-size:.86rem;text-transform:uppercase;color:var(--muted);letter-spacing:.04em}
+    .badge{padding:5px 10px;border-radius:999px;background:var(--soft);color:var(--brand2);font-size:.78rem;font-weight:700}
+    .scroll{overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+    .item,.invite{padding:14px;border-radius:18px;background:rgba(255,255,255,.82);border:1px solid var(--line)}
+    .item{cursor:pointer;transition:.16s transform,.16s border-color}.item:hover{transform:translateX(2px);border-color:rgba(23,106,77,.35)} .item.active{background:linear-gradient(135deg,rgba(23,106,77,.12),rgba(23,106,77,.03));border-color:rgba(23,106,77,.4)}
+    .item strong,.invite strong,.feed strong{display:block;margin-bottom:4px}.item span,.invite span,.feed span{font-size:.88rem;color:var(--muted);line-height:1.45}
+    .invite-actions{display:flex;gap:8px;margin-top:10px}.invite-actions button{flex:1;padding:10px 12px;border-radius:12px;font-size:.88rem}
+    .main{display:flex;flex-direction:column;background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(246,249,252,.86))}
+    .head{padding:22px 24px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+    .head h2{margin:0 0 8px;font-size:clamp(1.3rem,2vw,1.9rem)} .head p{margin:0;color:var(--muted);line-height:1.55}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}.invite-box{display:flex;gap:10px}.invite-box input{width:220px;background:#fff}
+    .content{display:grid;grid-template-columns:minmax(0,1fr) 300px;flex:1;min-height:0}
+    .chat{display:flex;flex-direction:column;min-height:0}.stream{flex:1;overflow-y:auto;padding:24px 24px 10px;display:flex;flex-direction:column;gap:14px}
+    .msg{max-width:min(78%,680px);padding:14px 16px;border-radius:18px;animation:rise .2s ease}.msg.mine{align-self:flex-end;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;border-bottom-right-radius:8px}.msg.other{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:8px}.msg.system{align-self:center;max-width:min(92%,700px);background:rgba(28,36,48,.06);border:1px dashed rgba(106,118,136,.36);text-align:center;color:var(--muted)}
+    .meta{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;opacity:.75;margin-bottom:6px}.body{line-height:1.6;word-break:break-word}
+    .empty{margin:auto;max-width:520px;text-align:center;padding:34px 22px;border-radius:24px;background:rgba(255,255,255,.8);border:1px dashed rgba(23,106,77,.28)} .empty h3{margin:0 0 10px}.empty p{margin:0;color:var(--muted);line-height:1.65}
+    .composer{padding:18px 24px 24px;border-top:1px solid var(--line);background:rgba(255,255,255,.74)} .hint-row{display:flex;justify-content:space-between;gap:12px;margin-bottom:12px}.hint{font-size:.9rem;color:var(--muted)} .send-row{display:flex;gap:12px}.send-row input{flex:1;background:#fff}
+    .feed-panel{border-left:1px solid var(--line);background:rgba(247,250,252,.92);padding:18px;overflow-y:auto}.feed-list{display:flex;flex-direction:column;gap:10px}.feed{padding:14px;border-radius:18px;background:rgba(255,255,255,.82);border:1px solid var(--line)}
+    .menu-btn{display:none}
+    @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    @media (max-width:980px){.login,.app{grid-template-columns:1fr}.sidebar{position:absolute;inset:0 auto 0 0;width:min(88vw,340px);z-index:10;transform:translateX(-102%);transition:transform .22s ease;box-shadow:22px 0 36px rgba(20,31,51,.12)}.app.sidebar-open .sidebar{transform:translateX(0)}.menu-btn{display:inline-grid;place-items:center;width:42px;height:42px;padding:0;border-radius:12px;background:#eff5f9}.content{grid-template-columns:1fr}.feed-panel{border-left:none;border-top:1px solid var(--line)}}
+    @media (max-width:720px){body{padding:10px}.hero,.panel{padding:26px}.head,.stream,.composer,.feed-panel{padding-left:18px;padding-right:18px}.actions,.invite-box,.send-row{flex-direction:column;align-items:stretch}.invite-box input{width:100%}}
+  </style>
 </head>
 <body>
-
-<div class="chat-container">
-    <div class="chat-header"> Rust Chat Realtime</div>
-
-    <div id="login-screen" class="login-overlay">
-        <input type="text" id="username" placeholder="Nhập tên của bạn..." maxlength="20">
-        <button onclick="connect()">Kết nối</button>
-    </div>
-
-    <div id="chat-screen" class="hidden">
-        <div id="chat-window"></div>
-        <div class="input-area">
-            <input type="text" id="message-input" placeholder="Nhập tin nhắn..." onkeypress="handleKeyPress(event)">
-            <button id="send-btn" onclick="sendMessage()">Gửi</button>
+  <div class="shell">
+    <section id="loginScreen" class="login">
+      <div class="hero">
+        <div>
+          <div class="badge" style="background:rgba(255,255,255,.14);color:#f4fbf8">Rust WebSocket Chat</div>
+          <h1>Group chat va private rooms tren cung mot man hinh.</h1>
+          <p>UI web nay tach ro Chat chung, loi moi private, va cac room 1-1 dang active de thao tac nhanh hon va de nhan biet hon.</p>
         </div>
-    </div>
-</div>
+        <div class="chips">
+          <div class="chip"><strong>Chat chung rieng biet</strong><br><span>Giu nguyen logic group chat hien co va hien thanh room mac dinh.</span></div>
+          <div class="chip"><strong>Invites de xu ly</strong><br><span>Accept va Decline ngay trong sidebar, khong can nhap lenh thu cong.</span></div>
+          <div class="chip"><strong>Private room ro rang</strong><br><span>Moi room hien ten partner va noi dung chi trong dung ngữ cảnh.</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="card">
+          <h2>Ket noi vao chat</h2>
+          <p>Nhap username de vao giao dien room-based va dung private chat 1-1 tren web.</p>
+          <label for="usernameInput">Username</label>
+          <input id="usernameInput" type="text" maxlength="20" placeholder="Vi du: alice" autocomplete="off">
+          <div style="height:14px"></div>
+          <button id="connectBtn" class="primary" type="button">Ket noi</button>
+          <div id="errorBox" class="error"></div>
+        </div>
+      </div>
+    </section>
 
-<script>
-    let ws;
-    let myUsername = "";
+    <section id="appScreen" class="app hidden">
+      <aside class="sidebar">
+        <div class="profile">
+          <div id="avatar" class="avatar">?</div>
+          <div>
+            <strong id="profileName">Guest</strong>
+            <span id="profileStatus">Dang ket noi</span>
+          </div>
+        </div>
+        <div class="scroll">
+          <section>
+            <div class="section-title"><h3>Rooms</h3><span id="roomCount" class="badge">1 room</span></div>
+            <div id="roomList"></div>
+          </section>
+          <section>
+            <div class="section-title"><h3>Invites</h3><span id="inviteCount" class="badge">0</span></div>
+            <div id="inviteList"></div>
+          </section>
+          <section>
+            <div class="section-title"><h3>Pending Sent</h3></div>
+            <div id="sentList"></div>
+          </section>
+        </div>
+      </aside>
 
-    const loginScreen = document.getElementById('login-screen');
-    const chatScreen = document.getElementById('chat-screen');
-    const chatWindow = document.getElementById('chat-window');
-    const messageInput = document.getElementById('message-input');
+      <main class="main">
+        <div class="head">
+          <div>
+            <button id="openMenuBtn" class="menu-btn" type="button">☰</button>
+            <h2 id="roomTitle">Chat chung</h2>
+            <p id="roomSubtitle">Toan bo tin nhan group se hien tai day.</p>
+          </div>
+          <div id="headerActions" class="actions"></div>
+        </div>
+
+        <div class="content">
+          <section class="chat">
+            <div id="stream" class="stream"></div>
+            <div class="composer">
+              <div class="hint-row">
+                <span id="composerHint" class="hint">Nhap tin nhan vao Chat chung hoac gui loi moi private.</span>
+                <span id="connectionBadge" class="badge">Chua ket noi</span>
+              </div>
+              <div class="send-row">
+                <input id="messageInput" type="text" placeholder="Nhap tin nhan..." autocomplete="off">
+                <button id="sendBtn" class="primary" type="button">Gui</button>
+              </div>
+            </div>
+          </section>
+
+          <aside class="feed-panel">
+            <div class="section-title"><h3>Activity Feed</h3><span style="color:var(--muted);font-size:.85rem">Event rooms</span></div>
+            <div id="feedList" class="feed-list"></div>
+          </aside>
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      connectionState: "disconnected",
+      currentUser: "",
+      selectedRoom: "group",
+      groupMessages: [],
+      pendingInvites: [],
+      pendingSentInvites: [],
+      privateRoomsById: {},
+      activityFeed: [],
+      ws: null,
+    };
+
+    const el = {
+      loginScreen: document.getElementById("loginScreen"),
+      appScreen: document.getElementById("appScreen"),
+      usernameInput: document.getElementById("usernameInput"),
+      connectBtn: document.getElementById("connectBtn"),
+      errorBox: document.getElementById("errorBox"),
+      profileName: document.getElementById("profileName"),
+      profileStatus: document.getElementById("profileStatus"),
+      avatar: document.getElementById("avatar"),
+      roomCount: document.getElementById("roomCount"),
+      inviteCount: document.getElementById("inviteCount"),
+      roomList: document.getElementById("roomList"),
+      inviteList: document.getElementById("inviteList"),
+      sentList: document.getElementById("sentList"),
+      roomTitle: document.getElementById("roomTitle"),
+      roomSubtitle: document.getElementById("roomSubtitle"),
+      headerActions: document.getElementById("headerActions"),
+      stream: document.getElementById("stream"),
+      messageInput: document.getElementById("messageInput"),
+      sendBtn: document.getElementById("sendBtn"),
+      composerHint: document.getElementById("composerHint"),
+      connectionBadge: document.getElementById("connectionBadge"),
+      feedList: document.getElementById("feedList"),
+      openMenuBtn: document.getElementById("openMenuBtn"),
+    };
+
+    el.connectBtn.addEventListener("click", connect);
+    el.usernameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
+    el.sendBtn.addEventListener("click", sendCurrentMessage);
+    el.messageInput.addEventListener("keydown", (e) => { if (e.key === "Enter") sendCurrentMessage(); });
+    el.openMenuBtn.addEventListener("click", () => el.appScreen.classList.toggle("sidebar-open"));
+
+    renderAll();
 
     function connect() {
-        myUsername = document.getElementById('username').value.trim();
-        if (!myUsername) return alert("Vui lòng nhập tên!");
+      const username = el.usernameInput.value.trim();
+      if (!username) return showError("Vui long nhap username truoc khi ket noi.");
 
-        ws = new WebSocket("ws://127.0.0.1:3000/ws");
+      clearError();
+      state.connectionState = "connecting";
+      state.currentUser = username;
+      renderStatus();
 
-        ws.onopen = () => {
-            loginScreen.classList.add('hidden');
-            chatScreen.classList.remove('hidden');
-            addMessage("", "Đã kết nối thành công!", "system");
-            
-            ws.send(JSON.stringify({
-            username: myUsername,
-            content: "__join__"
-            }));
-        };
+      const ws = new WebSocket("ws://127.0.0.1:3000/ws");
+      state.ws = ws;
 
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.username === "SYSTEM") {
-                    addMessage("", data.content, "system");
-                    return;
-                }
-                const type = data.username === myUsername ? "mine" : "user";
-                addMessage(data.username, data.content, type);
-            } catch (e) {
-                console.error("Lỗi parse JSON:", e);
-            }
-        };
+      ws.onopen = () => {
+        state.connectionState = "connected";
+        el.loginScreen.classList.add("hidden");
+        el.appScreen.classList.remove("hidden");
+        el.profileName.textContent = state.currentUser;
+        el.avatar.textContent = state.currentUser.charAt(0).toUpperCase();
+        addFeed("Ket noi thanh cong", "Ban da ket noi toi Rust server.");
+        sendJson({ username: state.currentUser, content: "__join__" });
+        renderAll();
+      };
 
-        ws.onclose = () => {
-            addMessage("SYSTEM", "Mất kết nối tới server.", "system");
-            document.getElementById('send-btn').disabled = true;
-        };
+      ws.onmessage = (event) => {
+        let data;
+        try { data = JSON.parse(event.data); }
+        catch { addFeed("JSON loi", "Khong the phan tich du lieu tu server."); return; }
 
-        ws.onerror = () => {
-            alert("Không thể kết nối tới server Rust!");
-        };
+        if (isPrivateMessage(data)) handlePrivate(data);
+        else if (isGroupMessage(data)) handleGroup(data);
+        renderAll();
+      };
+
+      ws.onclose = () => {
+        state.connectionState = "closed";
+        addFeed("Ngat ket noi", "Ket noi toi server da dong.");
+        renderStatus();
+      };
+
+      ws.onerror = () => {
+        if (state.connectionState !== "connected") showError("Khong the ket noi toi server Rust.");
+        state.connectionState = "error";
+        renderStatus();
+      };
     }
 
-    function sendMessage() {
-        const content = messageInput.value.trim();
-        if (!content || !ws) return;
+    function sendCurrentMessage() {
+      const content = el.messageInput.value.trim();
+      if (!content || !canSend()) return;
 
-        ws.send(JSON.stringify({
-        username: myUsername,
-        content: content
-        }));
-        messageInput.value = "";
+      if (state.selectedRoom === "group") {
+        sendJson({ username: state.currentUser, content });
+      } else {
+        const room = state.privateRoomsById[state.selectedRoom];
+        if (!room) return;
+        sendJson({ type: "private_chat", from: state.currentUser, room_id: room.roomId, content });
+      }
+
+      el.messageInput.value = "";
+      el.messageInput.focus();
     }
 
-    function handleKeyPress(e) {
-        if (e.key === 'Enter') sendMessage();
+    function sendInvite(target) {
+      const to = target.trim();
+      if (!to) {
+        addFeed("Invite that bai", "Hay nhap dung username online de gui loi moi private.");
+        renderAll();
+        return;
+      }
+      sendJson({ type: "private_invite", from: state.currentUser, to });
+      if (!state.pendingSentInvites.includes(to)) state.pendingSentInvites.push(to);
+      addFeed("Da gui invite", `Da gui loi moi private toi ${to}.`);
+      renderAll();
     }
 
-    function addMessage(user, text, type) {
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${type}`;
-        
-        if (type === "system") {
-            msgDiv.textContent = text;
-        } else {
-            msgDiv.innerHTML = `<strong>${user}:</strong> ${text}`;
-        }
-
-        chatWindow.appendChild(msgDiv);
-        chatWindow.scrollTop = chatWindow.scrollHeight;
+    function acceptInvite(from) {
+      sendJson({ type: "private_invite_accepted", from: state.currentUser, to: from, room_id: "" });
     }
-</script>
 
+    function declineInvite(from) {
+      sendJson({ type: "private_invite_declined", from: state.currentUser, to: from });
+    }
+
+    function leaveRoom(roomId) {
+      sendJson({ type: "leave_private_room", from: state.currentUser, room_id: roomId });
+    }
+
+    function handleGroup(msg) {
+      state.groupMessages.push({
+        id: `g-${Date.now()}-${Math.random()}`,
+        username: msg.username,
+        content: msg.content,
+        kind: msg.username === "SYSTEM" ? "system" : (msg.username === state.currentUser ? "mine" : "other"),
+      });
+      if (msg.username === "SYSTEM") addFeed("System", msg.content);
+    }
+
+    function handlePrivate(msg) {
+      switch (msg.type) {
+        case "private_invite":
+          if (msg.to === state.currentUser && !state.pendingInvites.some((x) => x.from === msg.from)) {
+            state.pendingInvites.push({ from: msg.from });
+            addFeed("Invite moi", `${msg.from} muon mo private chat voi ban.`);
+          }
+          break;
+        case "private_invite_accepted":
+          removePendingInvite(msg.from);
+          removePendingInvite(msg.to);
+          removePendingSent(msg.from);
+          removePendingSent(msg.to);
+          activateRoom(msg.room_id, msg.from === state.currentUser ? msg.to : msg.from);
+          addFeed("Private active", `Private room voi ${msg.from === state.currentUser ? msg.to : msg.from} da san sang.`);
+          break;
+        case "private_invite_declined":
+          if (msg.to === state.currentUser) {
+            removePendingSent(msg.from);
+            addFeed("Invite bi decline", `${msg.from} da tu choi loi moi private cua ban.`);
+          }
+          break;
+        case "private_chat":
+          appendPrivateChat(msg);
+          break;
+        case "leave_private_room":
+          closeRoom(msg.room_id, msg.from);
+          break;
+        case "system":
+          addFeed("System", msg.content);
+          if (state.connectionState !== "connected" && /already online/i.test(msg.content)) showError(msg.content);
+          break;
+      }
+    }
+
+    function activateRoom(roomId, partner) {
+      const prev = state.privateRoomsById[roomId];
+      state.privateRoomsById[roomId] = {
+        roomId,
+        partner,
+        messages: prev ? prev.messages : [{ id:`s-${Date.now()}`, username:"SYSTEM", content:`Private chat voi ${partner} da duoc kich hoat.`, kind:"system" }],
+      };
+      state.selectedRoom = roomId;
+    }
+
+    function appendPrivateChat(msg) {
+      const partner = msg.from === state.currentUser ? inferPartnerFromRoom(msg.room_id) : msg.from;
+      if (!state.privateRoomsById[msg.room_id]) activateRoom(msg.room_id, partner);
+      state.privateRoomsById[msg.room_id].messages.push({
+        id:`p-${Date.now()}-${Math.random()}`,
+        username: msg.from,
+        content: msg.content,
+        kind: msg.from === state.currentUser ? "mine" : "other",
+      });
+    }
+
+    function closeRoom(roomId, actor) {
+      const room = state.privateRoomsById[roomId];
+      if (!room) return;
+      addFeed("Private dong", actor === state.currentUser ? `Ban da roi room voi ${room.partner}.` : `${actor} da roi private room voi ban.`);
+      delete state.privateRoomsById[roomId];
+      if (state.selectedRoom === roomId) state.selectedRoom = "group";
+    }
+
+    function inferPartnerFromRoom(roomId) {
+      const room = state.privateRoomsById[roomId];
+      return room ? room.partner : "private partner";
+    }
+
+    function removePendingInvite(from) {
+      state.pendingInvites = state.pendingInvites.filter((x) => x.from !== from);
+    }
+
+    function removePendingSent(name) {
+      state.pendingSentInvites = state.pendingSentInvites.filter((x) => x !== name);
+    }
+
+    function renderAll() {
+      renderStatus();
+      renderSidebar();
+      renderHeader();
+      renderMessages();
+      renderFeed();
+    }
+
+    function renderStatus() {
+      const labels = { disconnected:"Chua ket noi", connecting:"Dang ket noi", connected:"Truc tuyen", closed:"Da ngat ket noi", error:"Co loi ket noi" };
+      const label = labels[state.connectionState] || "Khong ro";
+      el.profileStatus.textContent = label;
+      el.connectionBadge.textContent = label;
+      el.sendBtn.disabled = !canSend();
+      el.messageInput.disabled = !canSend();
+    }
+
+    function renderSidebar() {
+      const rooms = Object.values(state.privateRoomsById).sort((a,b) => a.partner.localeCompare(b.partner));
+      el.roomCount.textContent = `${1 + rooms.length} room`;
+      el.inviteCount.textContent = String(state.pendingInvites.length);
+      el.roomList.innerHTML = "";
+      el.inviteList.innerHTML = "";
+      el.sentList.innerHTML = "";
+
+      el.roomList.appendChild(roomNode("group", "Chat chung", "Broadcast room cho moi thanh vien online."));
+      rooms.forEach((room) => el.roomList.appendChild(roomNode(room.roomId, room.partner, "Private room 1-1 dang active.")));
+
+      if (state.pendingInvites.length === 0) el.inviteList.innerHTML = `<div class="invite"><span>Chua co loi moi private nao.</span></div>`;
+      else state.pendingInvites.forEach((invite) => el.inviteList.appendChild(inviteNode(invite.from)));
+
+      if (state.pendingSentInvites.length === 0) el.sentList.innerHTML = `<div class="item"><span>Ban chua gui loi moi nao.</span></div>`;
+      else state.pendingSentInvites.forEach((name) => {
+        const node = document.createElement("div");
+        node.className = "item";
+        node.innerHTML = `<strong>${escapeHtml(name)}</strong><span>Dang cho accept private invite.</span>`;
+        el.sentList.appendChild(node);
+      });
+    }
+
+    function renderHeader() {
+      el.headerActions.innerHTML = "";
+      if (state.selectedRoom === "group") {
+        el.roomTitle.textContent = "Chat chung";
+        el.roomSubtitle.textContent = "Hoi thoai nhom giu nguyen logic hien tai. Gui invite private tu day.";
+        el.composerHint.textContent = "Nhap tin nhan group hoac moi mot user vao private room.";
+        const box = document.createElement("div");
+        box.className = "invite-box";
+        box.innerHTML = `<input type="text" placeholder="Nhap username de moi private"><button class="primary" type="button">Moi chat rieng</button>`;
+        const input = box.querySelector("input");
+        box.querySelector("button").addEventListener("click", () => { sendInvite(input.value); input.value = ""; input.focus(); });
+        input.addEventListener("keydown", (e) => { if (e.key === "Enter") { sendInvite(input.value); input.value = ""; } });
+        el.headerActions.appendChild(box);
+      } else {
+        const room = state.privateRoomsById[state.selectedRoom];
+        if (!room) { state.selectedRoom = "group"; return renderHeader(); }
+        el.roomTitle.textContent = room.partner;
+        el.roomSubtitle.textContent = `Dang nhan rieng voi ${room.partner}. Tin nhan chi nam trong room nay.`;
+        el.composerHint.textContent = `Moi tin nhan se duoc gui rieng cho ${room.partner}.`;
+        const tag = document.createElement("span");
+        tag.className = "badge";
+        tag.textContent = "Private room";
+        const leave = document.createElement("button");
+        leave.className = "danger";
+        leave.type = "button";
+        leave.textContent = "Leave private chat";
+        leave.addEventListener("click", () => leaveRoom(room.roomId));
+        el.headerActions.appendChild(tag);
+        el.headerActions.appendChild(leave);
+      }
+    }
+
+    function renderMessages() {
+      const messages = state.selectedRoom === "group" ? state.groupMessages : ((state.privateRoomsById[state.selectedRoom] || {}).messages || []);
+      el.stream.innerHTML = "";
+      if (messages.length === 0) {
+        el.stream.innerHTML = `<div class="empty"><h3>${state.selectedRoom === "group" ? "Chat chung dang trong" : "Private room chua co tin nhan"}</h3><p>${state.selectedRoom === "group" ? "Bat dau bang mot tin nhan group hoac gui invite de mo room rieng." : "Gui tin nhan dau tien de bat dau hoi thoai 1-1."}</p></div>`;
+        return;
+      }
+      messages.forEach((m) => {
+        const node = document.createElement("article");
+        node.className = `msg ${m.kind}`;
+        node.innerHTML = m.kind === "system"
+          ? `<div class="body">${escapeHtml(m.content)}</div>`
+          : `<div class="meta">${escapeHtml(m.username)}</div><div class="body">${escapeHtml(m.content)}</div>`;
+        el.stream.appendChild(node);
+      });
+      el.stream.scrollTop = el.stream.scrollHeight;
+    }
+
+    function renderFeed() {
+      el.feedList.innerHTML = "";
+      if (state.activityFeed.length === 0) {
+        el.feedList.innerHTML = `<div class="feed"><span>Chua co su kien nao.</span></div>`;
+        return;
+      }
+      state.activityFeed.slice().reverse().forEach((f) => {
+        const node = document.createElement("div");
+        node.className = "feed";
+        node.innerHTML = `<strong>${escapeHtml(f.title)}</strong><span>${escapeHtml(f.description)}</span>`;
+        el.feedList.appendChild(node);
+      });
+    }
+
+    function roomNode(id, title, subtitle) {
+      const node = document.createElement("div");
+      node.className = `item ${state.selectedRoom === id ? "active" : ""}`;
+      node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(subtitle)}</span>`;
+      node.addEventListener("click", () => { state.selectedRoom = id; el.appScreen.classList.remove("sidebar-open"); renderAll(); });
+      return node;
+    }
+
+    function inviteNode(from) {
+      const node = document.createElement("div");
+      node.className = "invite";
+      node.innerHTML = `<strong>${escapeHtml(from)}</strong><span>Muon mo private room voi ban.</span><div class="invite-actions"><button class="primary" type="button">Accept</button><button class="ghost" type="button">Decline</button></div>`;
+      const [acceptBtn, declineBtn] = node.querySelectorAll("button");
+      acceptBtn.addEventListener("click", () => acceptInvite(from));
+      declineBtn.addEventListener("click", () => {
+        declineInvite(from);
+        removePendingInvite(from);
+        addFeed("Invite da decline", `Ban da tu choi loi moi private tu ${from}.`);
+        renderAll();
+      });
+      return node;
+    }
+
+    function addFeed(title, description) {
+      state.activityFeed.push({ id:`f-${Date.now()}-${Math.random()}`, title, description });
+      if (state.activityFeed.length > 24) state.activityFeed = state.activityFeed.slice(-24);
+    }
+
+    function canSend() {
+      return state.connectionState === "connected" && state.ws && state.ws.readyState === WebSocket.OPEN;
+    }
+
+    function sendJson(payload) {
+      if (!canSend()) {
+        addFeed("Gui that bai", "Chua co ket noi toi server.");
+        renderAll();
+        return;
+      }
+      state.ws.send(JSON.stringify(payload));
+    }
+
+    function isGroupMessage(data) {
+      return typeof data.username === "string" && typeof data.content === "string";
+    }
+
+    function isPrivateMessage(data) {
+      return typeof data.type === "string";
+    }
+
+    function showError(msg) {
+      el.errorBox.textContent = msg;
+      el.errorBox.classList.add("show");
+    }
+
+    function clearError() {
+      el.errorBox.textContent = "";
+      el.errorBox.classList.remove("show");
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+  </script>
 </body>
 </html>

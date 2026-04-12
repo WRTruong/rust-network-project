@@ -12,6 +12,7 @@ pub async fn start_server() {
     let state: AppState = AppState {
         tx,
         history: Arc::new(Mutex::new(Vec::new())),
+        private_state: Arc::new(Mutex::new(Default::default())),
     };
     let app = Router::new()
         .route("/ws", get(ws_handler))
