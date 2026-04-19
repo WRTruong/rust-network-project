@@ -377,7 +377,10 @@
     <div class="sidebar hidden" id="sidebar">
       <div class="sidebar-header">
         <h2>Chats</h2>
-        <button class="btn-new" onclick="createRoom()">New</button>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-new" onclick="createRoomChat()" style="flex: 1;">Room</button>
+          <button class="btn-new" onclick="createPrivateChat()" style="flex: 1;">Private</button>
+        </div>
       </div>
       <div id="room-list"></div>
     </div>
@@ -559,22 +562,37 @@
       renderSidebar();
     }
 
-    function createRoom() {
-      const rawValue = prompt("Ten phong hoac @username:");
-      if (!rawValue) return;
+    function createRoomChat() {
+      const roomName = prompt("Nhap ten phong chat:");
+      if (!roomName) return;
 
-      const value = rawValue.trim();
-      if (!value) return;
+      const room = roomName.trim();
+      if (!room) return;
 
-      let room = value;
-      if (value.startsWith("@")) {
-        const target = value.slice(1).trim();
-        if (!target || target === username) {
-          alert("Private chat can username hop le");
-          return;
-        }
-        room = privateRoomId(username, target);
+      if (joinedRooms.has(room)) {
+        switchRoom(room);
+        return;
       }
+
+      joinRoom(room);
+    }
+
+    function createPrivateChat() {
+      const targetUser = prompt("Nhap username de chat rieng:");
+      if (!targetUser) return;
+
+      const target = targetUser.trim();
+      if (!target) {
+        alert("Username khong duoc de trong");
+        return;
+      }
+
+      if (target === username) {
+        alert("Khong the chat voi chinh minh");
+        return;
+      }
+
+      const room = privateRoomId(username, target);
 
       if (joinedRooms.has(room)) {
         switchRoom(room);

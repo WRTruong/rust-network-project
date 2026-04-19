@@ -107,6 +107,10 @@ async fn ensure_registered(
 
         clients.insert(requested_username.to_string(), client_tx.clone());
         *current_username = requested_username.to_string();
+        drop(clients);
+        
+        // Send private chat history for all private rooms involving this user
+        send_all_private_chat_history(state, client_tx, requested_username).await;
         return true;
     }
 
@@ -316,6 +320,22 @@ async fn send_history(
 
     for message in history {
         let _ = client_tx.send(message);
+    }
+}
+
+async fn send_all_private_chat_history(
+    state: &AppState,
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    username: &str,
+) {
+    let rooms = state.rooms.lock().await;
+    
+    for (room_name, messages) in rooms.iter() {
+        if is_private_room(room_name) && private_room_contains_user(room_name, username) {
+            for message in messages {
+                let _ = client_tx.send(message.clone());
+            }
+        }
     }
 }
 
