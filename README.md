@@ -1,13 +1,20 @@
 # Rust Network Project
 
-Project này xây dựng ứng dụng chat đơn giản bằng Rust sử dụng WebSocket.
+Ứng dụng chat đơn giản bằng Rust sử dụng WebSocket, hỗ trợ:
 
-## Chức năng hiện có
+- chat room công khai
+- private chat giữa 2 user
+- terminal client
+- giao diện web trong `index.html`
 
-- WebSocket server chạy tại `127.0.0.1:3000`
-- WebSocket client kết nối tới server qua terminal
-- Gửi và nhận dữ liệu theo dạng `ChatMessage { username, content }`
-- Broadcast tin nhắn tới nhiều client đang kết nối
+## Tính năng hiện tại
+
+- Server WebSocket chạy tại `127.0.0.1:3000`
+- Chat room công khai, mặc định vào room `general`
+- Private chat giữa 2 user theo username
+- Lưu lịch sử theo từng hội thoại
+- Hiển thị join/leave với public room
+- Username phải là duy nhất trong mỗi phiên kết nối
 
 ## Yêu cầu
 
@@ -32,7 +39,7 @@ git clone <repo-url>
 cd rust-network-project
 ```
 
-## Cách chạy server
+## Chạy server
 
 Mở terminal trong thư mục project và chạy:
 
@@ -40,22 +47,35 @@ Mở terminal trong thư mục project và chạy:
 cargo run
 ```
 
-Khi chạy thành công, màn hình sẽ hiển thị tương tự:
+Khi chạy thành công, màn hình hiện:
 
 ```text
 Starting Rust Chat Server...
-Server running on 127.0.0.1:3000
+Server running at ws://127.0.0.1:3000
 ```
 
-## Cách chạy client
+## Dùng terminal client
 
-Mở một terminal khác và chạy:
+Mở terminal khác và chạy:
 
 ```powershell
 cargo run -- client
 ```
 
-Sau đó nhập `username`, rồi nhập tin nhắn trực tiếp từ terminal.
+Sau đó nhập username. Client sẽ tự động vào room `general`.
+
+Khi kết nối xong, terminal hiển thị các lệnh hỗ trợ:
+
+```text
+Chat commands:
+  /dm <username> <message>  Send a private message
+  /join <room>              Join a public room
+  /switch <room|@user>      Change the active conversation
+  /leave                    Leave the active public room
+  /quit                     Exit
+```
+
+### Chat trong room công khai
 
 Ví dụ:
 
@@ -63,72 +83,176 @@ Ví dụ:
 Enter username: alice
 Connected to ws://127.0.0.1:3000/ws
 Handshake status: 101 Switching Protocols
-Type messages and press Enter. Type /quit to exit.
-alice> hello
-alice: hello
+alice [#general]> hello everyone
+[#general] alice: hello everyone
 ```
 
-Để thoát client, nhập:
+Tạo hoặc vào room mới:
 
 ```text
-/quit
+alice [#general]> /join rust
+Switched to #rust
+alice [#rust]> xin chào room rust
 ```
 
-## Test nhiều client
+Chuyển lại room khác:
 
-Để kiểm tra tính năng broadcast:
+```text
+/switch general
+/switch rust
+```
 
-1. Mở terminal thứ nhất và chạy server:
+Rời room hiện tại:
+
+```text
+/leave
+```
+
+Lưu ý:
+
+- `general` là room mặc định, không cần tạo thủ công
+- `/leave` chỉ áp dụng với public room
+
+### Chat private giữa 2 user
+
+Gửi tin nhắn riêng:
+
+```text
+/dm bob chào Bob
+```
+
+Sau lệnh này, client sẽ tạo hội thoại private với `bob` và chuyển sang hội thoại đó.
+
+Nếu muốn mở lại hội thoại private mà chưa gửi tin ngay:
+
+```text
+/switch @bob
+```
+
+Ví dụ:
+
+```text
+alice [#general]> /dm bob hello Bob
+alice [@bob]> bạn đang ở đó không?
+[@bob] alice: hello Bob
+[@bob] alice: bạn đang ở đó không?
+```
+
+## Dùng giao diện web
+
+Project có file giao diện tại `index.html`.
+
+### Cách mở
+
+Có 2 cách:
+
+1. Mở trực tiếp `index.html` trong browser
+2. dùng live server
+
+Sau khi mở trang:
+
+- nhập username
+- bấm `Kết nối`
+- ứng dụng sẽ tự động vào room `general`
+
+### Chat room trên web
+
+- Sidebar bên trái là danh sách hội thoại
+- Bấm `New` và nhập tên room để tạo/vào room mới
+- Chọn room trong sidebar để chuyển hội thoại
+- Bấm `Leave` để rời room hiện tại
+
+Ví dụ tạo room:
+
+```text
+rust
+```
+
+### Private chat trên web
+
+Từ giao diện web, bấm `New` và nhập:
+
+```text
+@bob
+```
+
+Hệ thống sẽ tạo private chat giữa bạn và `bob`, sau đó hiện trong sidebar dưới dạng một hội thoại riêng.
+
+Lưu ý:
+
+- private chat được nhận diện bằng `@username`
+- không cần tạo room thủ công cho private chat
+- lịch sử private chat được lưu riêng với public room
+
+## Test nhanh room và private
+
+1. Chạy server:
 
 ```powershell
 cargo run
 ```
 
-2. Mở 2 hoặc nhiều terminal khác và chạy client:
+2. Mở 2 client, có thể là:
 
-```powershell
-cargo run -- client
-```
+- 2 terminal client
+- 1 terminal client và 1 browser
+- 2 browser với 2 username khác nhau
 
-3. Nhập các `username` khác nhau
-5. Quan sát các client còn lại sẽ nhận được cùng tin nhắn
+3. Test public room:
 
-## Message format
+- `alice` vào `general` hoặc `/join rust`
+- `bob` vào cùng room đó
+- gửi tin và kiểm tra cả 2 bên đều nhận được
 
-Project đang sử dụng cấu trúc dữ liệu:
+4. Test private chat:
+
+- từ `alice`, gửi `/dm bob hello`
+- hoặc trên web bấm `New` và nhập `@bob`
+- kiểm tra chỉ `alice` và `bob` nhận được tin nhắn đó
+
+## Cấu trúc message
+
+Server và client đang trao đổi JSON theo cấu trúc:
 
 ```rust
 ChatMessage {
+    msg_type: String,
     username: String,
     content: String,
+    room: String,
+    target: String,
+    users: Vec<String>,
 }
 ```
 
-Client và server trao đổi dữ liệu bằng JSON.
+Ý nghĩa cơ bản:
 
-Ví dụ:
+- `msg_type`: `join`, `leave`, `message`, `system`, `error`
+- `room`: tên room công khai hoặc id private chat
+- `target`: user đích khi cần xử lý private chat
 
-```json
-{
-  "username": "alice",
-  "content": "hello"
-}
+Private chat được lưu theo dạng:
+
+```text
+dm:alice:bob
 ```
+
+Trong đó 2 username được sắp xếp ổn định để cả 2 phía cùng dùng chung một hội thoại.
 
 ## Cấu trúc thư mục
 
 ```text
 src/
-├── chat/
-│   ├── mod.rs
-│   └── message.rs
-├── client/
-│   ├── mod.rs
-│   └── client.rs
-├── server/
-│   ├── mod.rs
-│   └── websocket.rs
-└── main.rs
+|-- chat/
+|   |-- mod.rs
+|   `-- message.rs
+|-- client/
+|   |-- mod.rs
+|   `-- client.rs
+|-- server/
+|   |-- mod.rs
+|   `-- websocket.rs
+`-- main.rs
 ```
 
 ## Lệnh hữu ích
@@ -144,10 +268,3 @@ Build project:
 ```powershell
 cargo build
 ```
-
-## Hướng phát triển tiếp
-
-- thêm thông báo user join hoặc leave
-- không broadcast lại tin nhắn cho chính người gửi
-- lưu lịch sử chat
-- thêm giao diện người dùng

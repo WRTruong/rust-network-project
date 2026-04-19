@@ -6,4 +6,8 @@ pub struct ChatMessage {
     pub username: String,
     pub content: String,
     pub room: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub users: Vec<String>,
 }

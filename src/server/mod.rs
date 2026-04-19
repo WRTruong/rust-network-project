@@ -1,16 +1,16 @@
 pub mod websocket;
 
 use axum::{routing::get, Router};
-use std::{net::SocketAddr, collections::HashMap, sync::Arc};
-use tokio::sync::{broadcast, Mutex};
+use std::{collections::HashMap, collections::HashSet, net::SocketAddr, sync::Arc};
+use tokio::sync::Mutex;
 
 use crate::server::websocket::{ws_handler, AppState};
 
 pub async fn start_server() {
-    let (tx, _) = broadcast::channel(100);
     let state: AppState = AppState {
-        tx,
+        clients: Arc::new(Mutex::new(HashMap::new())),
         rooms: Arc::new(Mutex::new(HashMap::new())),
+        room_members: Arc::new(Mutex::new(HashMap::<String, HashSet<String>>::new())),
     };
     let app = Router::new()
         .route("/ws", get(ws_handler))

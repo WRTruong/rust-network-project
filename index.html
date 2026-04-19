@@ -33,7 +33,6 @@
       display: none !important;
     }
 
-    /* LOGIN SCREEN */
     .login {
       position: fixed;
       inset: 0;
@@ -92,7 +91,6 @@
       font-size: 14px;
     }
 
-    /* SIDEBAR */
     .sidebar {
       width: 270px;
       background: white;
@@ -185,7 +183,6 @@
       margin-top: 2px;
     }
 
-    /* CHAT AREA */
     .chat {
       flex: 1;
       display: flex;
@@ -219,7 +216,6 @@
       color: var(--text);
     }
 
-    /* CHAT WINDOW */
     #chat-window {
       flex: 1;
       padding: 15px 20px;
@@ -240,7 +236,6 @@
       margin-bottom: 10px;
     }
 
-    /* MESSAGES */
     .msg-group {
       margin-bottom: 8px;
       display: flex;
@@ -312,7 +307,6 @@
       padding: 0;
     }
 
-    /* INPUT AREA */
     .input-area {
       padding: 10px 20px;
       border-top: 1px solid var(--border);
@@ -351,7 +345,6 @@
       font-size: 14px;
     }
 
-    /* SCROLLBAR */
     ::-webkit-scrollbar {
       width: 6px;
     }
@@ -372,17 +365,15 @@
 </head>
 <body>
   <div class="app">
-    <!-- LOGIN SCREEN -->
     <div class="login" id="login">
       <div class="login-card">
         <h1>Rust Chat App</h1>
-        <p>Nhập tên của bạn</p>
-        <input id="username" type="text" placeholder="Tên bạn..." maxlength="50">
-        <button onclick="connect()">Kết nối</button>
+        <p>Nhap ten cua ban</p>
+        <input id="username" type="text" placeholder="Ten ban..." maxlength="50">
+        <button onclick="connect()">Ket noi</button>
       </div>
     </div>
 
-    <!-- SIDEBAR -->
     <div class="sidebar hidden" id="sidebar">
       <div class="sidebar-header">
         <h2>Chats</h2>
@@ -391,18 +382,16 @@
       <div id="room-list"></div>
     </div>
 
-    <!-- CHAT AREA -->
     <div class="chat hidden" id="chat-screen">
       <div class="chat-header">
         <h3 id="room-title"># general</h3>
         <button class="btn-leave" onclick="handleLeave()">Leave</button>
       </div>
       <div id="chat-window">
-        <div class="empty">
-        </div>
+        <div class="empty"></div>
       </div>
       <div class="input-area">
-        <input id="message-input" type="text" placeholder="Nhập tin..." maxlength="500" 
+        <input id="message-input" type="text" placeholder="Nhap tin..." maxlength="500"
                onkeypress="if(event.key==='Enter') sendMessage()">
         <button class="btn-send" onclick="sendMessage()">Send</button>
       </div>
@@ -410,14 +399,13 @@
   </div>
 
   <script>
-    // State Management
     let ws = null;
     let username = "";
     let currentRoom = null;
     let joinedRooms = new Map();
     let lastUser = "";
+    let suppressCloseAlert = false;
 
-    // DOM References
     const chatWindow = document.getElementById("chat-window");
     const roomTitle = document.getElementById("room-title");
     const roomList = document.getElementById("room-list");
@@ -426,11 +414,50 @@
     const sidebar = document.getElementById("sidebar");
     const chatScreen = document.getElementById("chat-screen");
 
-    // Initialize
+    function privateRoomId(left, right) {
+      const participants = [left.trim(), right.trim()].sort();
+      return `dm:${participants[0]}:${participants[1]}`;
+    }
+
+    function isPrivateRoom(room) {
+      return room.startsWith("dm:");
+    }
+
+    function getPrivateTarget(room) {
+      if (!isPrivateRoom(room)) return "";
+      const participants = room.replace("dm:", "").split(":");
+      return participants.find((name) => name !== username) || username;
+    }
+
+    function displayRoomName(room) {
+      return isPrivateRoom(room) ? `@${getPrivateTarget(room)}` : room;
+    }
+
+    function roomAvatar(room) {
+      const label = displayRoomName(room);
+      return label[0] ? label[0].toUpperCase() : "?";
+    }
+
+    function resetApp() {
+      ws = null;
+      currentRoom = null;
+      joinedRooms = new Map();
+      lastUser = "";
+      suppressCloseAlert = false;
+      roomList.innerHTML = "";
+      chatWindow.innerHTML = '<div class="empty"></div>';
+      roomTitle.textContent = "# general";
+      messageInput.value = "";
+      messageInput.placeholder = "Nhap tin...";
+      loginScreen.classList.remove("hidden");
+      sidebar.classList.add("hidden");
+      chatScreen.classList.add("hidden");
+    }
+
     function connect() {
       username = document.getElementById("username").value.trim();
       if (!username) {
-        alert("Nhập tên");
+        alert("Nhap ten");
         return;
       }
 
@@ -445,37 +472,53 @@
 
       ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
+        if (data.msg_type === "error") {
+          suppressCloseAlert = true;
+          alert(data.content);
+          ws.close();
+          return;
+        }
+
         if (!joinedRooms.has(data.room)) {
           joinedRooms.set(data.room, { msgs: [] });
         }
+
         joinedRooms.get(data.room).msgs.push(data);
         renderSidebar();
+
+        if (!currentRoom) {
+          switchRoom(data.room);
+          return;
+        }
+
         if (data.room === currentRoom) {
           renderMessage(data);
         }
       };
 
-      ws.onerror = () => alert("Lỗi kết nối");
+      ws.onerror = () => alert("Loi ket noi");
       ws.onclose = () => {
-        alert("Mất kết nối");
-        loginScreen.classList.remove("hidden");
-        sidebar.classList.add("hidden");
-        chatScreen.classList.add("hidden");
+        if (!suppressCloseAlert) {
+          alert("Mat ket noi");
+        }
+        resetApp();
       };
     }
 
-    // Room Management
     function joinRoom(room) {
       if (joinedRooms.has(room)) {
         switchRoom(room);
         return;
       }
+
       joinedRooms.set(room, { msgs: [] });
       ws.send(JSON.stringify({
         msg_type: "join",
         username,
         room,
-        content: ""
+        content: "",
+        target: "",
+        users: []
       }));
       switchRoom(room);
     }
@@ -483,18 +526,28 @@
     function switchRoom(room) {
       currentRoom = room;
       lastUser = "";
-      roomTitle.textContent = "# " + room;
+      roomTitle.textContent = isPrivateRoom(room) ? displayRoomName(room) : `# ${room}`;
+      messageInput.placeholder = isPrivateRoom(room)
+        ? `Nhan rieng cho ${displayRoomName(room)}...`
+        : "Nhap tin...";
       renderSidebar();
       renderMessages();
     }
 
     function handleLeave() {
       if (!currentRoom) return;
-      ws.send(JSON.stringify({
-        msg_type: "leave",
-        username,
-        room: currentRoom
-      }));
+
+      if (!isPrivateRoom(currentRoom)) {
+        ws.send(JSON.stringify({
+          msg_type: "leave",
+          username,
+          room: currentRoom,
+          content: "",
+          target: "",
+          users: []
+        }));
+      }
+
       joinedRooms.delete(currentRoom);
       const next = [...joinedRooms.keys()][0];
       if (next) {
@@ -507,32 +560,46 @@
     }
 
     function createRoom() {
-      const room = prompt("Tên phòng:");
-      if (!room) return;
+      const rawValue = prompt("Ten phong hoac @username:");
+      if (!rawValue) return;
+
+      const value = rawValue.trim();
+      if (!value) return;
+
+      let room = value;
+      if (value.startsWith("@")) {
+        const target = value.slice(1).trim();
+        if (!target || target === username) {
+          alert("Private chat can username hop le");
+          return;
+        }
+        room = privateRoomId(username, target);
+      }
+
       if (joinedRooms.has(room)) {
-        alert("Đã tồn tại");
         switchRoom(room);
         return;
       }
+
       joinRoom(room);
     }
 
-    // Rendering
     function renderSidebar() {
       const html = [...joinedRooms].map(([room, data]) => {
         const lastMsg = data.msgs[data.msgs.length - 1];
-        const preview = lastMsg ? lastMsg.content.substring(0, 30) : "Chưa có tin";
+        const preview = lastMsg ? lastMsg.content.substring(0, 30) : "Chua co tin";
         const isActive = room === currentRoom ? "active" : "";
         return `
           <div class="room-item ${isActive}" onclick="switchRoom('${room}')">
-            <div class="room-avatar">${room[0].toUpperCase()}</div>
+            <div class="room-avatar">${roomAvatar(room)}</div>
             <div class="room-info">
-              <div class="room-name">${room}</div>
+              <div class="room-name">${displayRoomName(room)}</div>
               <div class="room-msg">${preview}</div>
             </div>
           </div>
         `;
       }).join("");
+
       roomList.innerHTML = html;
     }
 
@@ -541,6 +608,7 @@
         chatWindow.innerHTML = '<div class="empty"></div>';
         return;
       }
+
       chatWindow.innerHTML = "";
       lastUser = "";
       joinedRooms.get(currentRoom).msgs.forEach(renderMessage);
@@ -556,7 +624,6 @@
         chatWindow.appendChild(div);
       } else {
         if (isNewUser && msg.username !== username) {
-          // Show user header with avatar and username
           const headerDiv = document.createElement("div");
           headerDiv.className = "msg-user-header";
           headerDiv.innerHTML = `
@@ -582,12 +649,16 @@
     function sendMessage() {
       const text = messageInput.value.trim();
       if (!text || !currentRoom) return;
+
       ws.send(JSON.stringify({
         msg_type: "message",
         username,
         content: text,
-        room: currentRoom
+        room: currentRoom,
+        target: isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "",
+        users: []
       }));
+
       messageInput.value = "";
       messageInput.focus();
     }
