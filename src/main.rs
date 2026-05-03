@@ -1,7 +1,8 @@
 mod chat;
 mod client;
 mod server;
-
+mod db;
+mod auth;
 #[tokio::main]
 async fn main() {
     let mode = std::env::args().nth(1);
