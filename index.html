@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rust Chat App</title>
+  <style>
+    :root {
+      --primary: #0084ff;
+      --text: #333;
+      --border: #e5e5e5;
+      --bg: #f5f5f5;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .app {
+      display: flex;
+      height: 100vh;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .login {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(135deg, var(--primary), #0052cc);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+
+    .login-card {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      width: 300px;
+      text-align: center;
+      box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .login-card h1 {
+      color: var(--primary);
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+
+    .login-card p {
+      color: #777;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    .login-card input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+
+    .login-card input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(0, 132, 255, 0.1);
+    }
+
+    .login-card button {
+      width: 100%;
+      padding: 10px;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .sidebar {
+      width: 270px;
+      background: white;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar-header {
+      padding: 12px 15px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .sidebar-header h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .btn-new {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #room-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 5px;
+    }
+
+    .room-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-bottom: 2px;
+      transition: background 0.2s;
+    }
+
+    .room-item:hover {
+      background: var(--bg);
+    }
+
+    .room-item.active {
+      background: #e7f3ff;
+    }
+
+    .room-avatar {
+      width: 40px;
+      height: 40px;
+      background: var(--primary);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      margin-right: 10px;
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+
+    .room-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .room-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .room-msg {
+      font-size: 12px;
+      color: #888;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .chat {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: white;
+    }
+
+    .chat-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chat-header h3 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0;
+    }
+
+    .btn-leave {
+      background: var(--bg);
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--text);
+    }
+
+    #chat-window {
+      flex: 1;
+      padding: 15px 20px;
+      overflow-y: auto;
+    }
+
+    .empty {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: auto;
+      color: #ccc;
+    }
+
+    .empty-icon {
+      font-size: 40px;
+      margin-bottom: 10px;
+    }
+
+    .msg-group {
+      margin-bottom: 8px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    .msg-group.own {
+      justify-content: flex-end;
+    }
+
+    .msg-group.system {
+      justify-content: center;
+    }
+
+    .msg-avatar {
+      width: 28px;
+      height: 28px;
+      background: var(--primary);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .msg-group.own .msg-avatar {
+      display: none;
+    }
+
+    .msg-user-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0 4px 0;
+      margin-top: 8px;
+    }
+
+    .msg-username {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .msg {
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: #f0f0f0;
+      max-width: 65%;
+      font-size: 14px;
+      line-height: 1.4;
+      color: var(--text);
+      word-wrap: break-word;
+    }
+
+    .msg.deleted {
+      color: #888;
+      font-style: italic;
+    }
+
+    .msg-group.own .msg.deleted {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .msg-media {
+      margin-top: 6px;
+      display: block;
+    }
+
+    .msg-media img,
+    .msg-media video {
+      display: block;
+      max-width: min(360px, 100%);
+      max-height: 260px;
+      border-radius: 8px;
+      background: #111;
+    }
+
+    .file-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.06);
+      color: inherit;
+      text-decoration: none;
+      max-width: 100%;
+    }
+
+    .msg-group.own .file-link {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .file-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .msg-meta {
+      margin-top: 4px;
+      font-size: 11px;
+      opacity: 0.75;
+    }
+
+    .msg-actions {
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .msg-group:hover .msg-actions {
+      opacity: 1;
+    }
+
+    .msg-action {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .msg-group.own .msg {
+      background: var(--primary);
+      color: white;
+    }
+
+    .msg-group.system .msg {
+      background: transparent;
+      color: #999;
+      font-size: 12px;
+      font-style: italic;
+      padding: 0;
+    }
+
+    .input-area {
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #message-input {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      color: var(--text);
+    }
+
+    #message-input::placeholder {
+      color: #bbb;
+    }
+
+    #message-input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(0, 132, 255, 0.1);
+    }
+
+    .btn-send {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .btn-tool {
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      cursor: pointer;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .media-panel {
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      background: #fafafa;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .media-panel input {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .selected-file {
+      min-width: 160px;
+      color: #666;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .edit-bar {
+      padding: 8px 20px;
+      border-top: 1px solid var(--border);
+      background: #fff8e5;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: #6b4d00;
+    }
+
+    .link-btn {
+      background: transparent;
+      border: none;
+      color: var(--primary);
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    @media (max-width: 760px) {
+      .media-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .msg {
+        max-width: 82%;
+      }
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #ddd;
+      border-radius: 3px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #999;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="login" id="login">
+      <div class="login-card">
+        <h1>Rust Chat App</h1>
+        <p>Nhap ten cua ban</p>
+        <input id="username" type="text" placeholder="Ten ban..." maxlength="50">
+        <input id="server-port" type="number" placeholder="Port server" value="3000" min="1" max="65535">
+        <button onclick="connect()">Ket noi</button>
+      </div>
+    </div>
+
+    <div class="sidebar hidden" id="sidebar">
+      <div class="sidebar-header">
+        <h2>Chats</h2>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-new" onclick="createRoomChat()" style="flex: 1;">Room</button>
+          <button class="btn-new" onclick="createPrivateChat()" style="flex: 1;">Private</button>
+        </div>
+      </div>
+      <div id="room-list"></div>
+    </div>
+
+    <div class="chat hidden" id="chat-screen">
+      <div class="chat-header">
+        <h3 id="room-title"># general</h3>
+        <button class="btn-leave" onclick="handleLeave()">Leave</button>
+      </div>
+      <div id="chat-window">
+        <div class="empty"></div>
+      </div>
+      <div class="media-panel hidden" id="media-panel">
+        <input id="media-file" type="file" onchange="handleSelectedFile()">
+        <div class="selected-file" id="selected-file">Chua chon tep</div>
+      </div>
+      <div class="edit-bar hidden" id="edit-bar">
+        <span id="edit-label">Dang sua tin nhan</span>
+        <button class="link-btn" onclick="cancelEdit()">Huy</button>
+      </div>
+      <div class="input-area">
+        <button class="btn-tool" onclick="toggleMediaPanel()" title="Gui media">+</button>
+        <input id="message-input" type="text" placeholder="Nhap tin..." maxlength="500"
+               onkeypress="if(event.key==='Enter') sendMessage()">
+        <button class="btn-send" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let username = "";
+    let currentRoom = null;
+    let joinedRooms = new Map();
+    let lastUser = "";
+    let suppressCloseAlert = false;
+    let editingMessageId = "";
+
+    const chatWindow = document.getElementById("chat-window");
+    const roomTitle = document.getElementById("room-title");
+    const roomList = document.getElementById("room-list");
+    const messageInput = document.getElementById("message-input");
+    const mediaPanel = document.getElementById("media-panel");
+    const mediaFile = document.getElementById("media-file");
+    const selectedFile = document.getElementById("selected-file");
+    const editBar = document.getElementById("edit-bar");
+    const editLabel = document.getElementById("edit-label");
+    const loginScreen = document.getElementById("login");
+    const sidebar = document.getElementById("sidebar");
+    const chatScreen = document.getElementById("chat-screen");
+
+    function privateRoomId(left, right) {
+      const participants = [left.trim(), right.trim()].sort();
+      return `dm:${participants[0]}:${participants[1]}`;
+    }
+
+    function isPrivateRoom(room) {
+      return room.startsWith("dm:");
+    }
+
+    function getPrivateTarget(room) {
+      if (!isPrivateRoom(room)) return "";
+      const participants = room.replace("dm:", "").split(":");
+      return participants.find((name) => name !== username) || username;
+    }
+
+    function displayRoomName(room) {
+      return isPrivateRoom(room) ? `@${getPrivateTarget(room)}` : room;
+    }
+
+    function roomAvatar(room) {
+      const label = displayRoomName(room);
+      return label[0] ? label[0].toUpperCase() : "?";
+    }
+
+    function resetApp() {
+      ws = null;
+      currentRoom = null;
+      joinedRooms = new Map();
+      lastUser = "";
+      suppressCloseAlert = false;
+      editingMessageId = "";
+      roomList.innerHTML = "";
+      chatWindow.innerHTML = '<div class="empty"></div>';
+      roomTitle.textContent = "# general";
+      messageInput.value = "";
+      messageInput.placeholder = "Nhap tin...";
+      mediaPanel.classList.add("hidden");
+      editBar.classList.add("hidden");
+      clearMediaInputs();
+      loginScreen.classList.remove("hidden");
+      sidebar.classList.add("hidden");
+      chatScreen.classList.add("hidden");
+    }
+
+    function connect() {
+      username = document.getElementById("username").value.trim();
+      if (!username) {
+        alert("Nhap ten");
+        return;
+      }
+
+      const port = Number(document.getElementById("server-port").value || 3000);
+      const host = location.hostname || "127.0.0.1";
+      ws = new WebSocket(`ws://${host}:${port}/ws`);
+
+      ws.onopen = () => {
+        loginScreen.classList.add("hidden");
+        sidebar.classList.remove("hidden");
+        chatScreen.classList.remove("hidden");
+        joinRoom("general");
+      };
+
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.msg_type === "error") {
+          suppressCloseAlert = true;
+          alert(data.content);
+          ws.close();
+          return;
+        }
+
+        if (data.msg_type === "media_ack" || data.msg_type === "delete_ack" || data.msg_type === "edit_ack") {
+          return;
+        }
+
+        if (!data.room) return;
+
+        if (!joinedRooms.has(data.room)) {
+          joinedRooms.set(data.room, { msgs: [] });
+        }
+
+        const updatedExisting = upsertRoomMessage(data.room, data);
+        renderSidebar();
+
+        if (!currentRoom) {
+          switchRoom(data.room);
+          return;
+        }
+
+        if (data.room === currentRoom && updatedExisting) {
+          renderMessages();
+        } else if (data.room === currentRoom) {
+          renderMessage(data);
+        }
+      };
+
+      ws.onerror = () => alert(`Loi ket noi ws://${host}:${port}/ws`);
+      ws.onclose = () => {
+        if (!suppressCloseAlert) {
+          alert("Mat ket noi");
+        }
+        resetApp();
+      };
+    }
+
+    function joinRoom(room) {
+      if (joinedRooms.has(room)) {
+        switchRoom(room);
+        return;
+      }
+
+      joinedRooms.set(room, { msgs: [] });
+      ws.send(JSON.stringify({
+        msg_type: "join",
+        username,
+        room,
+        content: "",
+        target: "",
+        users: []
+      }));
+      switchRoom(room);
+    }
+
+    function switchRoom(room) {
+      currentRoom = room;
+      lastUser = "";
+      cancelEdit();
+      roomTitle.textContent = isPrivateRoom(room) ? displayRoomName(room) : `# ${room}`;
+      messageInput.placeholder = isPrivateRoom(room)
+        ? `Nhan rieng cho ${displayRoomName(room)}...`
+        : "Nhap tin...";
+      renderSidebar();
+      renderMessages();
+    }
+
+    function handleLeave() {
+      if (!currentRoom) return;
+
+      if (!isPrivateRoom(currentRoom)) {
+        ws.send(JSON.stringify({
+          msg_type: "leave",
+          username,
+          room: currentRoom,
+          content: "",
+          target: "",
+          users: []
+        }));
+      }
+
+      joinedRooms.delete(currentRoom);
+      const next = [...joinedRooms.keys()][0];
+      if (next) {
+        switchRoom(next);
+      } else {
+        currentRoom = null;
+        chatWindow.innerHTML = '<div class="empty"></div>';
+      }
+      renderSidebar();
+    }
+
+    function createRoomChat() {
+      const roomName = prompt("Nhap ten phong chat:");
+      if (!roomName) return;
+
+      const room = roomName.trim();
+      if (!room) return;
+
+      if (joinedRooms.has(room)) {
+        switchRoom(room);
+        return;
+      }
+
+      joinRoom(room);
+    }
+
+    function createPrivateChat() {
+      const targetUser = prompt("Nhap username de chat rieng:");
+      if (!targetUser) return;
+
+      const target = targetUser.trim();
+      if (!target) {
+        alert("Username khong duoc de trong");
+        return;
+      }
+
+      if (target === username) {
+        alert("Khong the chat voi chinh minh");
+        return;
+      }
+
+      const room = privateRoomId(username, target);
+
+      if (joinedRooms.has(room)) {
+        switchRoom(room);
+        return;
+      }
+
+      joinRoom(room);
+    }
+
+    function renderSidebar() {
+      const html = [...joinedRooms].map(([room, data]) => {
+        const lastMsg = data.msgs[data.msgs.length - 1];
+        const preview = lastMsg ? previewMessage(lastMsg).substring(0, 30) : "Chua co tin";
+        const isActive = room === currentRoom ? "active" : "";
+        return `
+          <div class="room-item ${isActive}" onclick="switchRoom('${room}')">
+            <div class="room-avatar">${roomAvatar(room)}</div>
+            <div class="room-info">
+              <div class="room-name">${displayRoomName(room)}</div>
+              <div class="room-msg">${preview}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      roomList.innerHTML = html;
+    }
+
+    function renderMessages() {
+      if (!currentRoom || !joinedRooms.get(currentRoom)?.msgs?.length) {
+        chatWindow.innerHTML = '<div class="empty"></div>';
+        return;
+      }
+
+      chatWindow.innerHTML = "";
+      lastUser = "";
+      joinedRooms.get(currentRoom).msgs.forEach(renderMessage);
+    }
+
+    function renderMessage(msg) {
+      const isNewUser = lastUser !== msg.username;
+
+      if (msg.msg_type === "system") {
+        const div = document.createElement("div");
+        div.className = "msg-group system";
+        div.innerHTML = `<div class="msg">${msg.content}</div>`;
+        chatWindow.appendChild(div);
+      } else {
+        if (isNewUser && msg.username !== username) {
+          const headerDiv = document.createElement("div");
+          headerDiv.className = "msg-user-header";
+          headerDiv.innerHTML = `
+            <div class="msg-avatar">${msg.username[0].toUpperCase()}</div>
+            <div class="msg-username">${msg.username}</div>
+          `;
+          chatWindow.appendChild(headerDiv);
+        }
+
+        const div = document.createElement("div");
+        div.className = "msg-group" + (msg.username === username ? " own" : "");
+        const msgEl = document.createElement("div");
+        msgEl.className = "msg" + (msg.msg_type === "deleted" ? " deleted" : "");
+        msgEl.appendChild(buildMessageContent(msg));
+        if (msg.msg_type === "edited") {
+          const meta = document.createElement("div");
+          meta.className = "msg-meta";
+          meta.textContent = "da sua";
+          msgEl.appendChild(meta);
+        }
+        if (msg.username === username && canModifyMessage(msg)) {
+          const actions = document.createElement("div");
+          actions.className = "msg-actions";
+          actions.innerHTML = `
+            <button class="msg-action" title="Sua" onclick="startEdit('${msg.message_id}')">Edit</button>
+            <button class="msg-action" title="Xoa" onclick="deleteMessage('${msg.message_id}')">Del</button>
+          `;
+          div.appendChild(actions);
+        }
+        div.appendChild(msgEl);
+        chatWindow.appendChild(div);
+      }
+
+      lastUser = msg.username;
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text || !currentRoom) return;
+
+      if (editingMessageId) {
+        ws.send(JSON.stringify({
+          msg_type: "edit",
+          username,
+          content: text,
+          room: currentRoom,
+          target: editingMessageId,
+          users: []
+        }));
+        cancelEdit();
+        return;
+      }
+
+      if (!mediaPanel.classList.contains("hidden")) {
+        sendMedia(text);
+        return;
+      }
+
+      ws.send(JSON.stringify({
+        msg_type: "message",
+        username,
+        content: text,
+        room: currentRoom,
+        target: isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "",
+        users: []
+      }));
+
+      messageInput.value = "";
+      messageInput.focus();
+    }
+
+    function sendMedia(caption) {
+      const file = mediaFile.files[0];
+      if (!file) {
+        alert("Chon tep truoc khi gui");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        ws.send(JSON.stringify({
+          msg_type: "media",
+          username,
+          content: caption,
+          room: currentRoom,
+          target: isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "",
+          users: [],
+          media: {
+            media_type: detectMediaType(file),
+            file_url: reader.result,
+            file_name: file.name,
+            file_size: file.size,
+            mime_type: file.type || "application/octet-stream"
+          }
+        }));
+
+        messageInput.value = "";
+        clearMediaInputs();
+        mediaPanel.classList.add("hidden");
+        messageInput.focus();
+      };
+      reader.onerror = () => alert("Khong doc duoc tep");
+      reader.readAsDataURL(file);
+    }
+
+    function upsertRoomMessage(room, msg) {
+      const data = joinedRooms.get(room);
+      const id = msg.message_id;
+      if (!id) {
+        data.msgs.push(msg);
+        return false;
+      }
+
+      const existingIndex = data.msgs.findIndex((item) => item.message_id === id);
+      if (existingIndex >= 0) {
+        data.msgs[existingIndex] = msg;
+        return true;
+      } else {
+        data.msgs.push(msg);
+        return false;
+      }
+    }
+
+    function buildMessageContent(msg) {
+      const wrapper = document.createElement("div");
+      const text = document.createElement("div");
+      text.textContent = msg.content || mediaFallbackText(msg);
+      wrapper.appendChild(text);
+
+      if (msg.media && msg.msg_type !== "deleted") {
+        wrapper.appendChild(renderMedia(msg.media));
+        const meta = document.createElement("div");
+        meta.className = "msg-meta";
+        meta.textContent = `${msg.media.file_name} - ${formatBytes(msg.media.file_size)}`;
+        wrapper.appendChild(meta);
+      }
+
+      return wrapper;
+    }
+
+    function renderMedia(media) {
+      const box = document.createElement("div");
+      box.className = "msg-media";
+
+      if (media.media_type === "image") {
+        const img = document.createElement("img");
+        img.src = media.file_url;
+        img.alt = media.file_name;
+        box.appendChild(img);
+      } else if (media.media_type === "video") {
+        const video = document.createElement("video");
+        video.src = media.file_url;
+        video.controls = true;
+        box.appendChild(video);
+      } else {
+        const link = document.createElement("a");
+        link.className = "file-link";
+        link.href = media.file_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.innerHTML = `<span>File</span><span class="file-name"></span>`;
+        link.querySelector(".file-name").textContent = media.file_name;
+        box.appendChild(link);
+      }
+
+      return box;
+    }
+
+    function toggleMediaPanel() {
+      if (editingMessageId) cancelEdit();
+      mediaPanel.classList.toggle("hidden");
+      mediaFile.focus();
+    }
+
+    function clearMediaInputs() {
+      mediaFile.value = "";
+      selectedFile.textContent = "Chua chon tep";
+    }
+
+    function handleSelectedFile() {
+      const file = mediaFile.files[0];
+      selectedFile.textContent = file ? `${file.name} - ${formatBytes(file.size)}` : "Chua chon tep";
+    }
+
+    function startEdit(messageId) {
+      const msg = findMessage(messageId);
+      if (!msg) return;
+      editingMessageId = messageId;
+      mediaPanel.classList.add("hidden");
+      editLabel.textContent = `Dang sua: ${msg.content.substring(0, 60)}`;
+      editBar.classList.remove("hidden");
+      messageInput.value = msg.content;
+      messageInput.focus();
+    }
+
+    function cancelEdit() {
+      editingMessageId = "";
+      editBar.classList.add("hidden");
+      messageInput.value = "";
+    }
+
+    function deleteMessage(messageId) {
+      if (!messageId || !confirm("Xoa/thu hoi tin nhan nay?")) return;
+      ws.send(JSON.stringify({
+        msg_type: "delete",
+        username,
+        content: messageId,
+        room: currentRoom,
+        target: "",
+        users: []
+      }));
+    }
+
+    function findMessage(messageId) {
+      if (!currentRoom) return null;
+      return joinedRooms.get(currentRoom)?.msgs.find((msg) => msg.message_id === messageId) || null;
+    }
+
+    function canModifyMessage(msg) {
+      return msg.message_id && ["message", "media", "edited"].includes(msg.msg_type);
+    }
+
+    function previewMessage(msg) {
+      if (msg.msg_type === "deleted") return "[da xoa]";
+      if (msg.media) return `[${msg.media.media_type}] ${msg.content || msg.media.file_name}`;
+      return msg.content || "";
+    }
+
+    function mediaFallbackText(msg) {
+      return msg.media ? `[${msg.media.media_type}]` : "";
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes) return "0 B";
+      const units = ["B", "KB", "MB", "GB"];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+    }
+
+    function detectMediaType(file) {
+      if (file.type.startsWith("image/")) return "image";
+      if (file.type.startsWith("video/")) return "video";
+      return "file";
+    }
+  </script>
+</body>
+</html>
