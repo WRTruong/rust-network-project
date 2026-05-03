@@ -157,14 +157,7 @@ where
     S: Sink<Message> + Unpin,
     S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let join_msg = ChatMessage {
-        msg_type: "join".into(),
-        username: username.into(),
-        content: String::new(),
-        room: room.into(),
-        target: String::new(),
-        users: vec![],
-    };
+    let join_msg = ChatMessage::new("join", username, "", room);
 
     write
         .send(Message::Text(serde_json::to_string(&join_msg)?.into()))
@@ -182,14 +175,7 @@ where
     S: Sink<Message> + Unpin,
     S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let leave_msg = ChatMessage {
-        msg_type: "leave".into(),
-        username: username.into(),
-        content: String::new(),
-        room: room.into(),
-        target: String::new(),
-        users: vec![],
-    };
+    let leave_msg = ChatMessage::new("leave", username, "", room);
 
     write
         .send(Message::Text(serde_json::to_string(&leave_msg)?.into()))
@@ -209,14 +195,8 @@ where
     S::Error: std::error::Error + Send + Sync + 'static,
 {
     let target = other_private_participant(username, room);
-    let msg = ChatMessage {
-        msg_type: "message".into(),
-        username: username.into(),
-        content: content.into(),
-        room: room.into(),
-        target,
-        users: vec![],
-    };
+    let mut msg = ChatMessage::new("message", username, content, room);
+    msg.target = target;
 
     write
         .send(Message::Text(serde_json::to_string(&msg)?.into()))
@@ -227,7 +207,11 @@ where
 
 fn print_incoming_message(current_user: &str, msg: &ChatMessage) {
     match msg.msg_type.as_str() {
-        "system" => println!("[{}] {}", display_room(current_user, &msg.room), msg.content),
+        "system" => println!(
+            "[{}] {}",
+            display_room(current_user, &msg.room),
+            msg.content
+        ),
         "error" => println!("[ERROR] {}", msg.content),
         _ => {
             let conversation = display_room(current_user, &msg.room);
