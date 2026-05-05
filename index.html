@@ -509,22 +509,34 @@
 </head>
 <body>
   <div class="app">
-    <div class="login" id="login">
-      <div class="login-card">
-        <h1>Rust Chat App</h1>
-        <p>Nhap ten cua ban</p>
-        <input id="username" type="text" placeholder="Ten ban..." maxlength="50">
-        <input id="server-port" type="number" placeholder="Port server" value="3000" min="1" max="65535">
-        <button onclick="connect()">Ket noi</button>
-      </div>
+    <div id="login" class="login-card">
+    <h1 id="auth-title">Rust Chat App</h1>
+    <p id="auth-desc">Vui lòng đăng nhập hệ thống</p>
+    
+    <input id="username-input" type="text" placeholder="Tên đăng nhập..." maxlength="50">
+    <input id="password-input" type="password" placeholder="Mật khẩu..." maxlength="50">
+    
+    <div id="auth-buttons" style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="btn-primary" onclick="handleAuth(isLoginMode ? 'login' : 'register')">Đăng nhập</button>
+        <button id="btn-secondary" onclick="handleAuth('register')" 
+                style="background: #28a745; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer;">
+            Tạo tài khoản mới
+        </button>
     </div>
+    
+    <div id="auth-toggle" style="margin-top: 15px; font-size: 13px;">
+        <a href="#" onclick="toggleAuthMode()" id="toggle-link" style="color: var(--primary); text-decoration: none;">
+            Chưa có tài khoản? Đăng ký ngay
+        </a>
+    </div>
+</div>
 
     <div class="sidebar hidden" id="sidebar">
       <div class="sidebar-header">
         <h2>Chats</h2>
         <div style="display: flex; gap: 6px;">
-          <button class="btn-new" onclick="createRoomChat()" style="flex: 1;">Room</button>
-          <button class="btn-new" onclick="createPrivateChat()" style="flex: 1;">Private</button>
+          <button class="btn-new" onclick="createRoomChat()" style="flex: 1;">Phòng</button>
+          <button class="btn-new" onclick="createPrivateChat()" style="flex: 1;">Riêng</button>
         </div>
       </div>
       <div id="room-list"></div>
@@ -533,7 +545,7 @@
     <div class="chat hidden" id="chat-screen">
       <div class="chat-header">
         <h3 id="room-title"># general</h3>
-        <button class="btn-leave" onclick="handleLeave()">Leave</button>
+        <button class="btn-leave" onclick="handleLeave()">Rời phòng</button>
       </div>
       <div id="chat-window">
         <div class="empty"></div>
@@ -547,10 +559,9 @@
         <button class="link-btn" onclick="cancelEdit()">Huy</button>
       </div>
       <div class="input-area">
-        <button class="btn-tool" onclick="toggleMediaPanel()" title="Gui media">+</button>
-        <input id="message-input" type="text" placeholder="Nhap tin..." maxlength="500"
+        <input id="message-input" type="text" placeholder="Nhập tin nhắn..." maxlength="500"
                onkeypress="if(event.key==='Enter') sendMessage()">
-        <button class="btn-send" onclick="sendMessage()">Send</button>
+        <button class="btn-send" onclick="sendMessage()">Gửi</button>
       </div>
     </div>
   </div>
@@ -562,7 +573,7 @@
     let joinedRooms = new Map();
     let lastUser = "";
     let suppressCloseAlert = false;
-    let editingMessageId = "";
+    let isLoginMode = true;
 
     const chatWindow = document.getElementById("chat-window");
     const roomTitle = document.getElementById("room-title");
@@ -578,27 +589,123 @@
     const chatScreen = document.getElementById("chat-screen");
 
     function privateRoomId(left, right) {
-      const participants = [left.trim(), right.trim()].sort();
-      return `dm:${participants[0]}:${participants[1]}`;
+        const participants = [left.trim(), right.trim()].sort();
+        return `dm:${participants[0]}:${participants[1]}`;
     }
 
-    function isPrivateRoom(room) {
-      return room.startsWith("dm:");
-    }
+    function isPrivateRoom(room) { return room && room.startsWith("dm:"); }
 
     function getPrivateTarget(room) {
-      if (!isPrivateRoom(room)) return "";
-      const participants = room.replace("dm:", "").split(":");
-      return participants.find((name) => name !== username) || username;
+        if (!isPrivateRoom(room)) return "";
+        const participants = room.replace("dm:", "").split(":");
+        return participants.find((name) => name !== username) || username;
     }
 
-    function displayRoomName(room) {
-      return isPrivateRoom(room) ? `@${getPrivateTarget(room)}` : room;
-    }
+    function displayRoomName(room) { return isPrivateRoom(room) ? `@${getPrivateTarget(room)}` : room; }
 
     function roomAvatar(room) {
-      const label = displayRoomName(room);
-      return label[0] ? label[0].toUpperCase() : "?";
+        const label = displayRoomName(room);
+        return label[0] ? label[0].toUpperCase() : "?";
+    }
+
+    function toggleAuthMode() {
+        isLoginMode = !isLoginMode;
+        const title = document.getElementById("auth-title");
+        const desc = document.getElementById("auth-desc");
+        const btnPrimary = document.getElementById("btn-primary");
+        const btnSecondary = document.getElementById("btn-secondary");
+        const toggleLink = document.getElementById("toggle-link");
+
+        if (isLoginMode) {
+            title.innerText = "Rust Chat App";
+            desc.innerText = "Vui lòng đăng nhập hệ thống";
+            btnPrimary.innerText = "Đăng nhập";
+            btnPrimary.style.display = "block";
+            btnSecondary.style.display = "block";
+            btnSecondary.innerText = "Tạo tài khoản mới";
+            toggleLink.innerText = "Chưa có tài khoản? Đăng ký ngay";
+        } else {
+            title.innerText = "Đăng ký tài khoản";
+            desc.innerText = "Tham gia cộng đồng Rust";
+            btnPrimary.innerText = "Xác nhận Đăng ký";
+            btnSecondary.style.display = "none";
+            toggleLink.innerText = "Đã có tài khoản? Đăng nhập";
+        }
+    }
+
+    function handleAuth(mode) {
+        username = document.getElementById("username-input").value.trim();
+        const password = document.getElementById("password-input").value.trim();
+
+        if (!username || !password) {
+            alert("Vui lòng nhập đầy đủ thông tin");
+            return;
+        }
+
+        // Khởi tạo kết nối WebSocket nếu chưa có
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            ws = new WebSocket(`ws://${location.hostname}:3000/ws`);
+            
+            ws.onopen = () => {
+                sendAuthRequest(mode, username, password);
+            };
+
+            ws.onmessage = handleServerMessage; // Chuyển logic onmessage ra hàm riêng
+            ws.onclose = () => {
+                if (!suppressCloseAlert) alert("Mất kết nối tới Server");
+                resetApp();
+            };
+        } else {
+            sendAuthRequest(mode, username, password);
+        }
+    }
+
+    function sendAuthRequest(mode, user, pass) {
+        // mode sẽ là 'login' hoặc 'register'
+        const authData = {
+            msg_type: mode, 
+            username: user,
+            password: pass,
+            content: mode === "register" ? "Yêu cầu đăng ký mới" : "Yêu cầu đăng nhập",
+            room: "general",
+            target: "",
+            users: []
+        };
+        ws.send(JSON.stringify(authData));
+    }
+
+    function handleServerMessage(e) {
+        const data = JSON.parse(e.data);
+        
+        if (data.msg_type === "error") {
+        alert("Thông báo: " + data.content);
+        return; 
+      }
+
+        // Logic chuyển màn hình khi Đăng ký/Đăng nhập thành công
+        // Server nên gửi msg_type: "system" và content chứa chữ "thành công"
+        if (data.msg_type === "system" && data.content.toLowerCase().includes("thành công")) {
+            alert(data.content);
+            if (isLoginMode === false) {
+                toggleAuthMode(); // Chuyển về màn hình Đăng nhập sau khi đăng ký xong
+            } else {
+                loginScreen.classList.add("hidden");
+                sidebar.classList.remove("hidden");
+                chatScreen.classList.remove("hidden");
+                joinRoom("general");
+            }
+        }
+
+        // Lưu và hiển thị tin nhắn như cũ
+        if (!joinedRooms.has(data.room)) {
+            joinedRooms.set(data.room, { msgs: [] });
+        }
+        joinedRooms.get(data.room).msgs.push(data);
+        renderSidebar();
+
+        if (data.room === currentRoom) {
+            renderMessage(data);
+        }
     }
 
     function resetApp() {
@@ -607,79 +714,74 @@
       joinedRooms = new Map();
       lastUser = "";
       suppressCloseAlert = false;
-      editingMessageId = "";
       roomList.innerHTML = "";
       chatWindow.innerHTML = '<div class="empty"></div>';
-      roomTitle.textContent = "# general";
-      messageInput.value = "";
-      messageInput.placeholder = "Nhap tin...";
-      mediaPanel.classList.add("hidden");
-      editBar.classList.add("hidden");
-      clearMediaInputs();
       loginScreen.classList.remove("hidden");
       sidebar.classList.add("hidden");
       chatScreen.classList.add("hidden");
     }
 
     function connect() {
-      username = document.getElementById("username").value.trim();
-      if (!username) {
-        alert("Nhap ten");
-        return;
-      }
+        username = document.getElementById("username-input").value.trim();
+        const password = document.getElementById("password-input").value.trim();
 
-      const port = Number(document.getElementById("server-port").value || 3000);
-      const host = location.hostname || "127.0.0.1";
-      ws = new WebSocket(`ws://${host}:${port}/ws`);
-
-      ws.onopen = () => {
-        loginScreen.classList.add("hidden");
-        sidebar.classList.remove("hidden");
-        chatScreen.classList.remove("hidden");
-        joinRoom("general");
-      };
-
-      ws.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.msg_type === "error") {
-          suppressCloseAlert = true;
-          alert(data.content);
-          ws.close();
-          return;
+        if (!username || !password) {
+            alert("Vui lòng nhập đầy đủ tài khoản và mật khẩu");
+            return;
         }
 
-        if (data.msg_type === "media_ack" || data.msg_type === "delete_ack" || data.msg_type === "edit_ack") {
-          return;
-        }
+        // Đổi IP/Port tương ứng với Server Rust của bạn
+        ws = new WebSocket(`ws://${location.hostname}:3000/ws`);
 
-        if (!data.room) return;
+        ws.onopen = () => {
+            // Gửi bản tin Login - Phải khớp với Struct ChatMessage trong Rust
+            const loginData = {
+                msg_type: "login",
+                username: username,
+                password: password, // MSSQL sẽ check pass này
+                content: "đang đăng nhập...",
+                room: "general",
+                target: "",
+                users: []
+            };
+            ws.send(JSON.stringify(loginData));
+        };
 
-        if (!joinedRooms.has(data.room)) {
-          joinedRooms.set(data.room, { msgs: [] });
-        }
+        ws.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            
+            // Xử lý lỗi từ Backend (Ví dụ: Sai pass SQL)
+            if (data.msg_type === "error") {
+                alert("Lỗi hệ thống: " + data.content);
+                suppressCloseAlert = true;
+                ws.close();
+                return;
+            }
 
-        const updatedExisting = upsertRoomMessage(data.room, data);
-        renderSidebar();
+            // Khi Login thành công, server thường gửi tin nhắn system
+            if (loginScreen.classList.contains("hidden") === false) {
+                loginScreen.classList.add("hidden");
+                sidebar.classList.remove("hidden");
+                chatScreen.classList.remove("hidden");
+                joinRoom("general");
+            }
 
-        if (!currentRoom) {
-          switchRoom(data.room);
-          return;
-        }
+            // Lưu trữ và hiển thị tin nhắn
+            if (!joinedRooms.has(data.room)) {
+                joinedRooms.set(data.room, { msgs: [] });
+            }
+            joinedRooms.get(data.room).msgs.push(data);
+            renderSidebar();
 
-        if (data.room === currentRoom && updatedExisting) {
-          renderMessages();
-        } else if (data.room === currentRoom) {
-          renderMessage(data);
-        }
-      };
+            if (data.room === currentRoom) {
+                renderMessage(data);
+            }
+        };
 
-      ws.onerror = () => alert(`Loi ket noi ws://${host}:${port}/ws`);
-      ws.onclose = () => {
-        if (!suppressCloseAlert) {
-          alert("Mat ket noi");
-        }
-        resetApp();
-      };
+        ws.onclose = () => {
+            if (!suppressCloseAlert) alert("Mất kết nối tới Server ACE Store");
+            resetApp();
+        };
     }
 
     function joinRoom(room) {
@@ -691,8 +793,9 @@
       joinedRooms.set(room, { msgs: [] });
       ws.send(JSON.stringify({
         msg_type: "join",
-        username,
-        room,
+        username: username,
+        password: "", // Không cần mật khẩu khi join room
+        room: room,
         content: "",
         target: "",
         users: []
@@ -705,82 +808,56 @@
       lastUser = "";
       cancelEdit();
       roomTitle.textContent = isPrivateRoom(room) ? displayRoomName(room) : `# ${room}`;
-      messageInput.placeholder = isPrivateRoom(room)
-        ? `Nhan rieng cho ${displayRoomName(room)}...`
-        : "Nhap tin...";
       renderSidebar();
       renderMessages();
     }
 
-    function handleLeave() {
-      if (!currentRoom) return;
+    function sendMessage() {
+        const input = document.getElementById("message-input");
+        const content = input.value.trim();
+        if (!content || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-      if (!isPrivateRoom(currentRoom)) {
-        ws.send(JSON.stringify({
-          msg_type: "leave",
-          username,
-          room: currentRoom,
-          content: "",
-          target: "",
-          users: []
-        }));
+        const target = isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "";
+
+        // Cấu trúc chuẩn để lưu vào SQL Server
+        const msg = {
+            msg_type: "message",
+            username: username,
+            password: "", // Không gửi pass khi chat
+            content: content,
+            room: currentRoom,
+            target: target,
+            users: []
+        };
+
+        ws.send(JSON.stringify(msg));
+        input.value = "";
+    }
+
+    function handleLeave() {
+      if (!currentRoom || currentRoom === "general") {
+        alert("Không thể rời khỏi phòng chung");
+        return;
       }
+
+      ws.send(JSON.stringify({
+        msg_type: "leave",
+        username: username,
+        password: "",
+        room: currentRoom,
+        content: "",
+        target: "",
+        users: []
+      }));
 
       joinedRooms.delete(currentRoom);
-      const next = [...joinedRooms.keys()][0];
-      if (next) {
-        switchRoom(next);
-      } else {
-        currentRoom = null;
-        chatWindow.innerHTML = '<div class="empty"></div>';
-      }
-      renderSidebar();
-    }
-
-    function createRoomChat() {
-      const roomName = prompt("Nhap ten phong chat:");
-      if (!roomName) return;
-
-      const room = roomName.trim();
-      if (!room) return;
-
-      if (joinedRooms.has(room)) {
-        switchRoom(room);
-        return;
-      }
-
-      joinRoom(room);
-    }
-
-    function createPrivateChat() {
-      const targetUser = prompt("Nhap username de chat rieng:");
-      if (!targetUser) return;
-
-      const target = targetUser.trim();
-      if (!target) {
-        alert("Username khong duoc de trong");
-        return;
-      }
-
-      if (target === username) {
-        alert("Khong the chat voi chinh minh");
-        return;
-      }
-
-      const room = privateRoomId(username, target);
-
-      if (joinedRooms.has(room)) {
-        switchRoom(room);
-        return;
-      }
-
-      joinRoom(room);
+      switchRoom("general");
     }
 
     function renderSidebar() {
-      const html = [...joinedRooms].map(([room, data]) => {
+      roomList.innerHTML = [...joinedRooms].map(([room, data]) => {
         const lastMsg = data.msgs[data.msgs.length - 1];
-        const preview = lastMsg ? previewMessage(lastMsg).substring(0, 30) : "Chua co tin";
+        const preview = lastMsg ? lastMsg.content : "Chưa có tin nhắn";
         const isActive = room === currentRoom ? "active" : "";
         return `
           <div class="room-item ${isActive}" onclick="switchRoom('${room}')">
@@ -792,24 +869,18 @@
           </div>
         `;
       }).join("");
-
-      roomList.innerHTML = html;
     }
 
     function renderMessages() {
-      if (!currentRoom || !joinedRooms.get(currentRoom)?.msgs?.length) {
-        chatWindow.innerHTML = '<div class="empty"></div>';
-        return;
-      }
-
       chatWindow.innerHTML = "";
-      lastUser = "";
-      joinedRooms.get(currentRoom).msgs.forEach(renderMessage);
+      if (!currentRoom) return;
+      const data = joinedRooms.get(currentRoom);
+      if (data) data.msgs.forEach(renderMessage);
     }
 
     function renderMessage(msg) {
       const isNewUser = lastUser !== msg.username;
-
+      
       if (msg.msg_type === "system") {
         const div = document.createElement("div");
         div.className = "msg-group system";
@@ -817,13 +888,13 @@
         chatWindow.appendChild(div);
       } else {
         if (isNewUser && msg.username !== username) {
-          const headerDiv = document.createElement("div");
-          headerDiv.className = "msg-user-header";
-          headerDiv.innerHTML = `
+          const header = document.createElement("div");
+          header.className = "msg-user-header";
+          header.innerHTML = `
             <div class="msg-avatar">${msg.username[0].toUpperCase()}</div>
             <div class="msg-username">${msg.username}</div>
           `;
-          chatWindow.appendChild(headerDiv);
+          chatWindow.appendChild(header);
         }
 
         const div = document.createElement("div");
@@ -854,39 +925,16 @@
       chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
-    function sendMessage() {
-      const text = messageInput.value.trim();
-      if (!text || !currentRoom) return;
+    function createRoomChat() {
+      const name = prompt("Nhập tên phòng:");
+      if (name) joinRoom(name.trim());
+    }
 
-      if (editingMessageId) {
-        ws.send(JSON.stringify({
-          msg_type: "edit",
-          username,
-          content: text,
-          room: currentRoom,
-          target: editingMessageId,
-          users: []
-        }));
-        cancelEdit();
-        return;
+    function createPrivateChat() {
+      const target = prompt("Nhập username người nhận:");
+      if (target && target.trim() !== username) {
+        joinRoom(privateRoomId(username, target.trim()));
       }
-
-      if (!mediaPanel.classList.contains("hidden")) {
-        sendMedia(text);
-        return;
-      }
-
-      ws.send(JSON.stringify({
-        msg_type: "message",
-        username,
-        content: text,
-        room: currentRoom,
-        target: isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "",
-        users: []
-      }));
-
-      messageInput.value = "";
-      messageInput.focus();
     }
 
     function sendMedia(caption) {

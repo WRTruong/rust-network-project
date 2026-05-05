@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize,Default)]
 pub struct ChatMessage {
     pub msg_type: String,
     pub username: String,
+    pub password: String,
     pub content: String,
     pub room: String,
     #[serde(default)]

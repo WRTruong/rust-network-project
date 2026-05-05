@@ -9,6 +9,9 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 pub async fn start_client() -> Result<(), Box<dyn std::error::Error>> {
     let username = read_input("Enter username: ")?;
+    // THÊM: Nhập mật khẩu để gửi lên server xác thực
+    let password = read_input("Enter password: ")?;
+    
     let general_room = "general".to_string();
     let server_url = "ws://127.0.0.1:3000/ws";
     let (socket, response) = connect_async(server_url).await?;
@@ -18,14 +21,17 @@ pub async fn start_client() -> Result<(), Box<dyn std::error::Error>> {
     println!("Handshake status: {}", response.status());
     println!("Chat commands:");
     println!("  /dm <username> <message>  Send a private message");
-    println!("  /join <room>              Join a public room");
-    println!("  /switch <room|@user>      Change the active conversation");
-    println!("  /leave                    Leave the active public room");
-    println!("  /quit                     Exit");
+    println!("  /join <room>               Join a public room");
+    println!("  /switch <room|@user>       Change the active conversation");
+    println!("  /leave                     Leave the active public room");
+    println!("  /quit                      Exit");
 
     let mut open_rooms = HashSet::from([general_room.clone()]);
     let mut active_room = general_room.clone();
 
+    // Gửi tin nhắn type "login" kèm password ngay khi kết nối
+    send_login(&mut write, &username, &password).await?;
+    // Sau đó join vào room mặc định
     send_join(&mut write, &username, &general_room).await?;
 
     let receive_username = username.clone();
@@ -148,63 +154,73 @@ pub async fn start_client() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn send_join<S>(
-    write: &mut S,
-    username: &str,
-    room: &str,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    S: Sink<Message> + Unpin,
-    S::Error: std::error::Error + Send + Sync + 'static,
+// THÊM: Hàm gửi tin nhắn đăng nhập
+async fn send_login<S>(write: &mut S, username: &str, password: &str) -> Result<(), Box<dyn std::error::Error>>
+where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let join_msg = ChatMessage::new("join", username, "", room);
-
-    write
-        .send(Message::Text(serde_json::to_string(&join_msg)?.into()))
-        .await?;
-
+    let msg = ChatMessage {
+        msg_type: "login".into(),
+        username: username.into(),
+        password: password.into(), // Gửi mật khẩu thật
+        content: String::new(),
+        room: String::new(),
+        target: String::new(),
+        users: vec![],
+    };
+    write.send(Message::Text(serde_json::to_string(&msg)?.into())).await?;
     Ok(())
 }
 
-async fn send_leave<S>(
-    write: &mut S,
-    username: &str,
-    room: &str,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    S: Sink<Message> + Unpin,
-    S::Error: std::error::Error + Send + Sync + 'static,
+async fn send_join<S>(write: &mut S, username: &str, room: &str) -> Result<(), Box<dyn std::error::Error>>
+where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let leave_msg = ChatMessage::new("leave", username, "", room);
-
-    write
-        .send(Message::Text(serde_json::to_string(&leave_msg)?.into()))
-        .await?;
-
+    let join_msg = ChatMessage {
+        msg_type: "join".into(),
+        username: username.into(),
+        password: String::new(), // Không cần mật khẩu khi join room
+        content: String::new(),
+        room: room.into(),
+        target: String::new(),
+        users: vec![],
+    };
+    write.send(Message::Text(serde_json::to_string(&join_msg)?.into())).await?;
     Ok(())
 }
 
-async fn send_chat<S>(
-    write: &mut S,
-    username: &str,
-    room: &str,
-    content: &str,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    S: Sink<Message> + Unpin,
-    S::Error: std::error::Error + Send + Sync + 'static,
+async fn send_leave<S>(write: &mut S, username: &str, room: &str) -> Result<(), Box<dyn std::error::Error>>
+where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
+{
+    let leave_msg = ChatMessage {
+        msg_type: "leave".into(),
+        username: username.into(),
+        password: String::new(),
+        content: String::new(),
+        room: room.into(),
+        target: String::new(),
+        users: vec![],
+    };
+    write.send(Message::Text(serde_json::to_string(&leave_msg)?.into())).await?;
+    Ok(())
+}
+
+async fn send_chat<S>(write: &mut S, username: &str, room: &str, content: &str) -> Result<(), Box<dyn std::error::Error>>
+where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
 {
     let target = other_private_participant(username, room);
-    let mut msg = ChatMessage::new("message", username, content, room);
-    msg.target = target;
-
-    write
-        .send(Message::Text(serde_json::to_string(&msg)?.into()))
-        .await?;
-
+    let msg = ChatMessage {
+        msg_type: "message".into(),
+        username: username.into(),
+        password: String::new(),
+        content: content.into(),
+        room: room.into(),
+        target,
+        users: vec![],
+    };
+    write.send(Message::Text(serde_json::to_string(&msg)?.into())).await?;
     Ok(())
 }
 
+// Các hàm helper giữ nguyên như cũ...
 fn print_incoming_message(current_user: &str, msg: &ChatMessage) {
     match msg.msg_type.as_str() {
         "system" => println!(
@@ -215,11 +231,7 @@ fn print_incoming_message(current_user: &str, msg: &ChatMessage) {
         "error" => println!("[ERROR] {}", msg.content),
         _ => {
             let conversation = display_room(current_user, &msg.room);
-            if msg.room.starts_with("dm:") {
-                println!("[{}] {}: {}", conversation, msg.username, msg.content);
-            } else {
-                println!("[{}] {}: {}", conversation, msg.username, msg.content);
-            }
+            println!("[{}] {}: {}", conversation, msg.username, msg.content);
         }
     }
 }
@@ -244,7 +256,6 @@ fn normalize_conversation(username: &str, target: &str) -> String {
     if let Some(private_target) = target.strip_prefix('@') {
         return private_room_id(username, private_target.trim());
     }
-
     target.to_string()
 }
 
@@ -273,17 +284,14 @@ fn display_room(username: &str, room: &str) -> String {
             .unwrap_or(username);
         return format!("@{}", other);
     }
-
     format!("#{}", room)
 }
 
 fn read_input(prompt: &str) -> Result<String, io::Error> {
     print!("{}", prompt);
     io::stdout().flush()?;
-
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-
     Ok(input.trim().to_string())
 }
 
