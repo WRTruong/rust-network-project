@@ -1,3 +1,5 @@
+use crate::chat::message::ChatMessage;
+use crate::chat::message_store::MessageStore;
 use axum::{
     extract::{
         State,
@@ -13,19 +15,17 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 #[derive(Clone)]
 pub struct AppState {
     pub clients: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ChatMessage>>>>,
     pub rooms: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
     pub room_members: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    pub message_store: MessageStore,
 }
 
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
@@ -66,10 +66,20 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
                 match msg.msg_type.as_str() {
                     "join" => {
-                        handle_join(&state, &client_tx, &username, &mut joined_rooms, &msg.room).await;
+                        handle_join(&state, &client_tx, &username, &mut joined_rooms, &msg.room)
+                            .await;
                     }
                     "message" => {
                         handle_message(&state, &client_tx, &username, &joined_rooms, &msg).await;
+                    }
+                    "media" => {
+                        handle_media(&state, &client_tx, &username, &joined_rooms, &msg).await;
+                    }
+                    "delete" => {
+                        handle_delete(&state, &client_tx, &username, &msg).await;
+                    }
+                    "edit" => {
+                        handle_edit(&state, &client_tx, &username, &msg).await;
                     }
                     "leave" => {
                         handle_leave(&state, &username, &mut joined_rooms, &msg.room).await;
@@ -338,6 +348,7 @@ async fn send_all_private_chat_history(_state: &AppState, client_tx: &mpsc::Unbo
 }
 
 async fn store_room_message(state: &AppState, msg: ChatMessage) {
+    state.message_store.add_message(msg.clone()).await;
     let mut rooms = state.rooms.lock().await;
     rooms.entry(msg.room.clone()).or_default().push(msg);
 }

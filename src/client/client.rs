@@ -223,7 +223,11 @@ where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'sta
 // Các hàm helper giữ nguyên như cũ...
 fn print_incoming_message(current_user: &str, msg: &ChatMessage) {
     match msg.msg_type.as_str() {
-        "system" => println!("[{}] {}", display_room(current_user, &msg.room), msg.content),
+        "system" => println!(
+            "[{}] {}",
+            display_room(current_user, &msg.room),
+            msg.content
+        ),
         "error" => println!("[ERROR] {}", msg.content),
         _ => {
             let conversation = display_room(current_user, &msg.room);

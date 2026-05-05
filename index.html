@@ -294,6 +294,80 @@
       word-wrap: break-word;
     }
 
+    .msg.deleted {
+      color: #888;
+      font-style: italic;
+    }
+
+    .msg-group.own .msg.deleted {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .msg-media {
+      margin-top: 6px;
+      display: block;
+    }
+
+    .msg-media img,
+    .msg-media video {
+      display: block;
+      max-width: min(360px, 100%);
+      max-height: 260px;
+      border-radius: 8px;
+      background: #111;
+    }
+
+    .file-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.06);
+      color: inherit;
+      text-decoration: none;
+      max-width: 100%;
+    }
+
+    .msg-group.own .file-link {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .file-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .msg-meta {
+      margin-top: 4px;
+      font-size: 11px;
+      opacity: 0.75;
+    }
+
+    .msg-actions {
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .msg-group:hover .msg-actions {
+      opacity: 1;
+    }
+
+    .msg-action {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+    }
+
     .msg-group.own .msg {
       background: var(--primary);
       color: white;
@@ -312,6 +386,7 @@
       border-top: 1px solid var(--border);
       display: flex;
       gap: 8px;
+      align-items: center;
     }
 
     #message-input {
@@ -343,6 +418,75 @@
       font-weight: 600;
       cursor: pointer;
       font-size: 14px;
+    }
+
+    .btn-tool {
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      cursor: pointer;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .media-panel {
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      background: #fafafa;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .media-panel input {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    .selected-file {
+      min-width: 160px;
+      color: #666;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .edit-bar {
+      padding: 8px 20px;
+      border-top: 1px solid var(--border);
+      background: #fff8e5;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: #6b4d00;
+    }
+
+    .link-btn {
+      background: transparent;
+      border: none;
+      color: var(--primary);
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    @media (max-width: 760px) {
+      .media-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .msg {
+        max-width: 82%;
+      }
     }
 
     ::-webkit-scrollbar {
@@ -406,6 +550,14 @@
       <div id="chat-window">
         <div class="empty"></div>
       </div>
+      <div class="media-panel hidden" id="media-panel">
+        <input id="media-file" type="file" onchange="handleSelectedFile()">
+        <div class="selected-file" id="selected-file">Chua chon tep</div>
+      </div>
+      <div class="edit-bar hidden" id="edit-bar">
+        <span id="edit-label">Dang sua tin nhan</span>
+        <button class="link-btn" onclick="cancelEdit()">Huy</button>
+      </div>
       <div class="input-area">
         <input id="message-input" type="text" placeholder="Nhập tin nhắn..." maxlength="500"
                onkeypress="if(event.key==='Enter') sendMessage()">
@@ -427,6 +579,11 @@
     const roomTitle = document.getElementById("room-title");
     const roomList = document.getElementById("room-list");
     const messageInput = document.getElementById("message-input");
+    const mediaPanel = document.getElementById("media-panel");
+    const mediaFile = document.getElementById("media-file");
+    const selectedFile = document.getElementById("selected-file");
+    const editBar = document.getElementById("edit-bar");
+    const editLabel = document.getElementById("edit-label");
     const loginScreen = document.getElementById("login");
     const sidebar = document.getElementById("sidebar");
     const chatScreen = document.getElementById("chat-screen");
@@ -649,6 +806,7 @@
     function switchRoom(room) {
       currentRoom = room;
       lastUser = "";
+      cancelEdit();
       roomTitle.textContent = isPrivateRoom(room) ? displayRoomName(room) : `# ${room}`;
       renderSidebar();
       renderMessages();
@@ -742,8 +900,23 @@
         const div = document.createElement("div");
         div.className = "msg-group" + (msg.username === username ? " own" : "");
         const msgEl = document.createElement("div");
-        msgEl.className = "msg";
-        msgEl.textContent = msg.content;
+        msgEl.className = "msg" + (msg.msg_type === "deleted" ? " deleted" : "");
+        msgEl.appendChild(buildMessageContent(msg));
+        if (msg.msg_type === "edited") {
+          const meta = document.createElement("div");
+          meta.className = "msg-meta";
+          meta.textContent = "da sua";
+          msgEl.appendChild(meta);
+        }
+        if (msg.username === username && canModifyMessage(msg)) {
+          const actions = document.createElement("div");
+          actions.className = "msg-actions";
+          actions.innerHTML = `
+            <button class="msg-action" title="Sua" onclick="startEdit('${msg.message_id}')">Edit</button>
+            <button class="msg-action" title="Xoa" onclick="deleteMessage('${msg.message_id}')">Del</button>
+          `;
+          div.appendChild(actions);
+        }
         div.appendChild(msgEl);
         chatWindow.appendChild(div);
       }
@@ -762,6 +935,180 @@
       if (target && target.trim() !== username) {
         joinRoom(privateRoomId(username, target.trim()));
       }
+    }
+
+    function sendMedia(caption) {
+      const file = mediaFile.files[0];
+      if (!file) {
+        alert("Chon tep truoc khi gui");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        ws.send(JSON.stringify({
+          msg_type: "media",
+          username,
+          content: caption,
+          room: currentRoom,
+          target: isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "",
+          users: [],
+          media: {
+            media_type: detectMediaType(file),
+            file_url: reader.result,
+            file_name: file.name,
+            file_size: file.size,
+            mime_type: file.type || "application/octet-stream"
+          }
+        }));
+
+        messageInput.value = "";
+        clearMediaInputs();
+        mediaPanel.classList.add("hidden");
+        messageInput.focus();
+      };
+      reader.onerror = () => alert("Khong doc duoc tep");
+      reader.readAsDataURL(file);
+    }
+
+    function upsertRoomMessage(room, msg) {
+      const data = joinedRooms.get(room);
+      const id = msg.message_id;
+      if (!id) {
+        data.msgs.push(msg);
+        return false;
+      }
+
+      const existingIndex = data.msgs.findIndex((item) => item.message_id === id);
+      if (existingIndex >= 0) {
+        data.msgs[existingIndex] = msg;
+        return true;
+      } else {
+        data.msgs.push(msg);
+        return false;
+      }
+    }
+
+    function buildMessageContent(msg) {
+      const wrapper = document.createElement("div");
+      const text = document.createElement("div");
+      text.textContent = msg.content || mediaFallbackText(msg);
+      wrapper.appendChild(text);
+
+      if (msg.media && msg.msg_type !== "deleted") {
+        wrapper.appendChild(renderMedia(msg.media));
+        const meta = document.createElement("div");
+        meta.className = "msg-meta";
+        meta.textContent = `${msg.media.file_name} - ${formatBytes(msg.media.file_size)}`;
+        wrapper.appendChild(meta);
+      }
+
+      return wrapper;
+    }
+
+    function renderMedia(media) {
+      const box = document.createElement("div");
+      box.className = "msg-media";
+
+      if (media.media_type === "image") {
+        const img = document.createElement("img");
+        img.src = media.file_url;
+        img.alt = media.file_name;
+        box.appendChild(img);
+      } else if (media.media_type === "video") {
+        const video = document.createElement("video");
+        video.src = media.file_url;
+        video.controls = true;
+        box.appendChild(video);
+      } else {
+        const link = document.createElement("a");
+        link.className = "file-link";
+        link.href = media.file_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.innerHTML = `<span>File</span><span class="file-name"></span>`;
+        link.querySelector(".file-name").textContent = media.file_name;
+        box.appendChild(link);
+      }
+
+      return box;
+    }
+
+    function toggleMediaPanel() {
+      if (editingMessageId) cancelEdit();
+      mediaPanel.classList.toggle("hidden");
+      mediaFile.focus();
+    }
+
+    function clearMediaInputs() {
+      mediaFile.value = "";
+      selectedFile.textContent = "Chua chon tep";
+    }
+
+    function handleSelectedFile() {
+      const file = mediaFile.files[0];
+      selectedFile.textContent = file ? `${file.name} - ${formatBytes(file.size)}` : "Chua chon tep";
+    }
+
+    function startEdit(messageId) {
+      const msg = findMessage(messageId);
+      if (!msg) return;
+      editingMessageId = messageId;
+      mediaPanel.classList.add("hidden");
+      editLabel.textContent = `Dang sua: ${msg.content.substring(0, 60)}`;
+      editBar.classList.remove("hidden");
+      messageInput.value = msg.content;
+      messageInput.focus();
+    }
+
+    function cancelEdit() {
+      editingMessageId = "";
+      editBar.classList.add("hidden");
+      messageInput.value = "";
+    }
+
+    function deleteMessage(messageId) {
+      if (!messageId || !confirm("Xoa/thu hoi tin nhan nay?")) return;
+      ws.send(JSON.stringify({
+        msg_type: "delete",
+        username,
+        content: messageId,
+        room: currentRoom,
+        target: "",
+        users: []
+      }));
+    }
+
+    function findMessage(messageId) {
+      if (!currentRoom) return null;
+      return joinedRooms.get(currentRoom)?.msgs.find((msg) => msg.message_id === messageId) || null;
+    }
+
+    function canModifyMessage(msg) {
+      return msg.message_id && ["message", "media", "edited"].includes(msg.msg_type);
+    }
+
+    function previewMessage(msg) {
+      if (msg.msg_type === "deleted") return "[da xoa]";
+      if (msg.media) return `[${msg.media.media_type}] ${msg.content || msg.media.file_name}`;
+      return msg.content || "";
+    }
+
+    function mediaFallbackText(msg) {
+      return msg.media ? `[${msg.media.media_type}]` : "";
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes) return "0 B";
+      const units = ["B", "KB", "MB", "GB"];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+    }
+
+    function detectMediaType(file) {
+      if (file.type.startsWith("image/")) return "image";
+      if (file.type.startsWith("video/")) return "video";
+      return "file";
     }
   </script>
 </body>
