@@ -120,9 +120,9 @@ async fn ensure_registered(
                     ).await;
 
                     match check_query {
-                        Ok(mut stream) => {
-                            if stream.next().await.is_some() {
-                                user_exists = true;
+                        Ok(stream) => {
+                            if let Ok(rows) = stream.into_first_result().await {
+                                user_exists = !rows.is_empty();
                             }
                         }
                         Err(e) => {
@@ -173,7 +173,7 @@ async fn ensure_registered(
                     let welcome = ChatMessage {
                         msg_type: "system".to_string(),
                         username: "System".to_string(),
-                        content: format!("Chào mừng {} đã quay trở lại!", requested_username),
+                        content: format!("Đăng nhập thành công! Chào mừng {}", requested_username),
                         room: "general".to_string(),
                         ..Default::default()
                     };
@@ -301,19 +301,39 @@ async fn cleanup_connection(state: &AppState, username: &str, _joined_rooms: &Ha
     // ... logic notify system leave (giữ nguyên của bạn) ...
 }
 
-async fn send_history(state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, room: &str) {
-    let rooms = state.rooms.lock().await;
-    if let Some(history) = rooms.get(room) {
-        for message in history { let _ = client_tx.send(message.clone()); }
+async fn send_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, room: &str) {
+    match db::get_room_history(room).await {
+        Ok(messages) => {
+            for (sender, content, room) in messages {
+                let msg = ChatMessage {
+                    msg_type: "message".into(),
+                    username: sender,
+                    content,
+                    room,
+                    ..Default::default()
+                };
+                let _ = client_tx.send(msg);
+            }
+        }
+        Err(e) => eprintln!("Failed to load room history: {}", e),
     }
 }
 
-async fn send_all_private_chat_history(state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, username: &str) {
-    let rooms = state.rooms.lock().await;
-    for (name, messages) in rooms.iter() {
-        if is_private_room(name) && private_room_contains_user(name, username) {
-            for m in messages { let _ = client_tx.send(m.clone()); }
+async fn send_all_private_chat_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, username: &str) {
+    match db::get_private_history(username).await {
+        Ok(messages) => {
+            for (sender, content, room) in messages {
+                let msg = ChatMessage {
+                    msg_type: "message".into(),
+                    username: sender,
+                    content,
+                    room,
+                    ..Default::default()
+                };
+                let _ = client_tx.send(msg);
+            }
         }
+        Err(e) => eprintln!("Failed to load private chat history: {}", e),
     }
 }
 
