@@ -1,0 +1,30 @@
+-- Tạo database
+CREATE DATABASE ChatDB;
+GO
+
+-- Chọn database để sử dụng
+USE ChatDB;
+GO
+
+-- Tạo bảng Users
+CREATE TABLE Users (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    username NVARCHAR(50) NOT NULL,
+    password NVARCHAR(255) NOT NULL
+);
+GO
+
+-- Tạo bảng ChatHistory
+CREATE TABLE ChatHistory (
+    id INT PRIMARY KEY IDENTITY(1,1),
+    sender NVARCHAR(50) NULL,
+    message NVARCHAR(MAX) NULL,
+    room NVARCHAR(50) NULL,
+    created_at DATETIME NULL DEFAULT GETDATE(),
+    media_type NVARCHAR(20) NULL,
+    file_url NVARCHAR(MAX) NULL,
+    file_name NVARCHAR(500) NULL,
+    file_size BIGINT NULL,
+    mime_type NVARCHAR(100) NULL
+);
+GO

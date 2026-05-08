@@ -39,6 +39,7 @@ impl ChatMessage {
         ChatMessage {
             msg_type: msg_type.to_string(),
             username: username.to_string(),
+            password: String::new(),
             content: content.to_string(),
             room: room.to_string(),
             target: String::new(),
@@ -49,18 +50,6 @@ impl ChatMessage {
         }
     }
 
-    pub fn with_media(mut self, media: MediaInfo) -> Self {
-        self.media = Some(media);
-        self
-    }
 }
 
-impl MediaInfo {
-    pub fn is_supported_type(&self) -> bool {
-        matches!(self.media_type.as_str(), "image" | "video" | "file")
-    }
-
-    pub fn has_required_metadata(&self) -> bool {
-        !self.file_url.trim().is_empty() && !self.file_name.trim().is_empty() && self.file_size > 0
-    }
-}
+impl MediaInfo {}
