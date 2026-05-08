@@ -29,11 +29,6 @@ impl MessageStore {
         msg_index.insert(message_id, (room, index));
     }
 
-    pub async fn get_room_messages(&self, room: &str) -> Vec<ChatMessage> {
-        let room_msgs = self.room_messages.read().await;
-        room_msgs.get(room).cloned().unwrap_or_default()
-    }
-
     pub async fn delete_message(&self, message_id: &str) -> Option<ChatMessage> {
         let msg_index = self.message_index.read().await;
 

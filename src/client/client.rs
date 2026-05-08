@@ -158,15 +158,8 @@ pub async fn start_client() -> Result<(), Box<dyn std::error::Error>> {
 async fn send_login<S>(write: &mut S, username: &str, password: &str) -> Result<(), Box<dyn std::error::Error>>
 where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let msg = ChatMessage {
-        msg_type: "login".into(),
-        username: username.into(),
-        password: password.into(), // Gửi mật khẩu thật
-        content: String::new(),
-        room: String::new(),
-        target: String::new(),
-        users: vec![],
-    };
+    let mut msg = ChatMessage::new("login", username, "", "");
+    msg.password = password.into();
     write.send(Message::Text(serde_json::to_string(&msg)?.into())).await?;
     Ok(())
 }
@@ -174,15 +167,8 @@ where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'sta
 async fn send_join<S>(write: &mut S, username: &str, room: &str) -> Result<(), Box<dyn std::error::Error>>
 where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let join_msg = ChatMessage {
-        msg_type: "join".into(),
-        username: username.into(),
-        password: String::new(), // Không cần mật khẩu khi join room
-        content: String::new(),
-        room: room.into(),
-        target: String::new(),
-        users: vec![],
-    };
+    let mut join_msg = ChatMessage::new("join", username, "", room);
+    join_msg.password = String::new();
     write.send(Message::Text(serde_json::to_string(&join_msg)?.into())).await?;
     Ok(())
 }
@@ -190,15 +176,8 @@ where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'sta
 async fn send_leave<S>(write: &mut S, username: &str, room: &str) -> Result<(), Box<dyn std::error::Error>>
 where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let leave_msg = ChatMessage {
-        msg_type: "leave".into(),
-        username: username.into(),
-        password: String::new(),
-        content: String::new(),
-        room: room.into(),
-        target: String::new(),
-        users: vec![],
-    };
+    let mut leave_msg = ChatMessage::new("leave", username, "", room);
+    leave_msg.password = String::new();
     write.send(Message::Text(serde_json::to_string(&leave_msg)?.into())).await?;
     Ok(())
 }
@@ -206,16 +185,9 @@ where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'sta
 async fn send_chat<S>(write: &mut S, username: &str, room: &str, content: &str) -> Result<(), Box<dyn std::error::Error>>
 where S: Sink<Message> + Unpin, S::Error: std::error::Error + Send + Sync + 'static,
 {
-    let target = other_private_participant(username, room);
-    let msg = ChatMessage {
-        msg_type: "message".into(),
-        username: username.into(),
-        password: String::new(),
-        content: content.into(),
-        room: room.into(),
-        target,
-        users: vec![],
-    };
+    let mut msg = ChatMessage::new("message", username, content, room);
+    msg.target = other_private_participant(username, room);
+    msg.password = String::new();
     write.send(Message::Text(serde_json::to_string(&msg)?.into())).await?;
     Ok(())
 }

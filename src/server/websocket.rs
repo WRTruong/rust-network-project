@@ -7,7 +7,6 @@ use axum::{
     },
     response::IntoResponse,
 };
-use crate::chat::message::ChatMessage;
 use crate::db; 
 use crate::auth; 
 use futures_util::{SinkExt, StreamExt};
@@ -234,17 +233,16 @@ async fn handle_message(
         return;
     }
 
-    let chat_msg = ChatMessage {
-        msg_type: "message".into(),
-        username: username.to_string(),
-        content: msg.content.clone(),
-        room: msg.room.clone(),
-        target: if is_private_room(&msg.room) {
-             private_room_participants(&msg.room).into_iter().find(|p| p != username).unwrap_or_default()
-        } else { String::new() },
-        password: String::new(), // Không gửi ngược password về
-        users: vec![],
+    let mut chat_msg = ChatMessage::new("message", username, &msg.content, &msg.room);
+    chat_msg.target = if is_private_room(&msg.room) {
+        private_room_participants(&msg.room)
+            .into_iter()
+            .find(|p| p != username)
+            .unwrap_or_default()
+    } else {
+        String::new()
     };
+    chat_msg.password = String::new();
 
     // --- LƯU VÀO SQL SERVER (Async Task) ---
     let db_msg = chat_msg.clone();
@@ -294,6 +292,149 @@ async fn handle_join(state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMes
     send_history(state, client_tx, room).await;
 }
 
+async fn handle_media(
+    state: &AppState,
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    username: &str,
+    joined_rooms: &HashSet<String>,
+    msg: &ChatMessage,
+) {
+    if msg.room.trim().is_empty() {
+        send_local_error(client_tx, "Room name is required");
+        return;
+    }
+    if msg.media.is_none() {
+        send_local_error(client_tx, "Media metadata is required");
+        return;
+    }
+    
+    // Kiểm tra kích thước file URL (base64 string)
+    if let Some(media) = &msg.media {
+        let max_size = 10 * 1024 * 1024; // 10MB cho base64 string
+        if media.file_url.len() > max_size {
+            send_local_error(client_tx, &format!("File quá lớn! Tối đa 10MB (hiện tại: {})", media.file_size));
+            return;
+        }
+    }
+    
+    if is_private_room(&msg.room) && !private_room_contains_user(&msg.room, username) {
+        send_local_error(client_tx, "Access denied to private room");
+        return;
+    }
+    if !is_private_room(&msg.room) && !joined_rooms.contains(&msg.room) {
+        send_local_error(client_tx, "Join the room before sending media");
+        return;
+    }
+
+    let mut chat_msg = ChatMessage::new("media", username, &msg.content, &msg.room);
+    chat_msg.target = if is_private_room(&msg.room) {
+        private_room_participants(&msg.room)
+            .into_iter()
+            .find(|p| p != username)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    chat_msg.password = String::new();
+    chat_msg.media = msg.media.clone();
+
+    // --- LƯU VÀO SQL SERVER (Async Task) ---
+    let db_msg = chat_msg.clone();
+    tokio::spawn(async move {
+        match crate::db::get_db_client().await {
+            Ok(mut client) => {
+                let (media_type, file_url, file_name, file_size, mime_type) = if let Some(media) = &db_msg.media {
+                    (
+                        Some(media.media_type.clone()),
+                        Some(media.file_url.clone()),
+                        Some(media.file_name.clone()),
+                        Some(media.file_size as i64),
+                        media.mime_type.clone()
+                    )
+                } else {
+                    (None, None, None, None, None)
+                };
+
+                let result = client.execute(
+                    "INSERT INTO ChatHistory (sender, message, room, created_at, media_type, file_url, file_name, file_size, mime_type) VALUES (@P1, @P2, @P3, GETDATE(), @P4, @P5, @P6, @P7, @P8)",
+                    &[&db_msg.username, &db_msg.content, &db_msg.room,
+                      &media_type, &file_url, &file_name, &file_size, &mime_type],
+                ).await;
+
+                if let Err(e) = result {
+                    eprintln!("SQL Execute Error (Media): {:?}", e);
+                }
+            },
+            Err(e) => {
+                eprintln!("SQL Connection Error: {}", e.to_string());
+            }
+        }
+    });
+
+    store_room_message(state, chat_msg.clone()).await;
+    if is_private_room(&msg.room) {
+        send_to_private_participants(state, &chat_msg).await;
+    } else {
+        send_to_room_members(state, &msg.room, &chat_msg).await;
+    }
+}
+
+async fn handle_delete(
+    state: &AppState,
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    username: &str,
+    msg: &ChatMessage,
+) {
+    if msg.message_id.trim().is_empty() {
+        send_local_error(client_tx, "Message ID is required for deletion");
+        return;
+    }
+    if !state.message_store.can_modify_message(&msg.message_id, username).await {
+        send_local_error(client_tx, "You are not allowed to delete this message");
+        return;
+    }
+
+    if let Some(edited) = state.message_store.delete_message(&msg.message_id).await {
+        if is_private_room(&edited.room) {
+            send_to_private_participants(state, &edited).await;
+        } else {
+            send_to_room_members(state, &edited.room, &edited).await;
+        }
+    } else {
+        send_local_error(client_tx, "Message not found or already deleted");
+    }
+}
+
+async fn handle_edit(
+    state: &AppState,
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    username: &str,
+    msg: &ChatMessage,
+) {
+    if msg.message_id.trim().is_empty() {
+        send_local_error(client_tx, "Message ID is required for edit");
+        return;
+    }
+    if msg.content.trim().is_empty() {
+        send_local_error(client_tx, "New content is required for edit");
+        return;
+    }
+    if !state.message_store.can_modify_message(&msg.message_id, username).await {
+        send_local_error(client_tx, "You are not allowed to edit this message");
+        return;
+    }
+
+    if let Some(edited) = state.message_store.edit_message(&msg.message_id, &msg.content).await {
+        if is_private_room(&edited.room) {
+            send_to_private_participants(state, &edited).await;
+        } else {
+            send_to_room_members(state, &edited.room, &edited).await;
+        }
+    } else {
+        send_local_error(client_tx, "Message not found or cannot be edited");
+    }
+}
+
 async fn handle_leave(state: &AppState, username: &str, joined_rooms: &mut HashSet<String>, room: &str) {
     if !joined_rooms.remove(room) { return; }
     if !is_private_room(room) {
@@ -314,14 +455,7 @@ async fn cleanup_connection(state: &AppState, username: &str, _joined_rooms: &Ha
 async fn send_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, room: &str) {
     match db::get_room_history(room).await {
         Ok(messages) => {
-            for (sender, content, room) in messages {
-                let msg = ChatMessage {
-                    msg_type: "message".into(),
-                    username: sender,
-                    content,
-                    room,
-                    ..Default::default()
-                };
+            for msg in messages {
                 let _ = client_tx.send(msg);
             }
         }
@@ -332,14 +466,7 @@ async fn send_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatM
 async fn send_all_private_chat_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, username: &str) {
     match db::get_private_history(username).await {
         Ok(messages) => {
-            for (sender, content, room) in messages {
-                let msg = ChatMessage {
-                    msg_type: "message".into(),
-                    username: sender,
-                    content,
-                    room,
-                    ..Default::default()
-                };
+            for msg in messages {
                 let _ = client_tx.send(msg);
             }
         }
@@ -381,6 +508,7 @@ fn send_local_error(client_tx: &mpsc::UnboundedSender<ChatMessage>, content: &st
         target: "".into(),
         password: "".into(),
         users: vec![],
+        ..Default::default()
     });
 }
 
