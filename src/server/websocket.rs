@@ -1,5 +1,7 @@
+use crate::auth::{self, UserSession};
 use crate::chat::message::ChatMessage;
 use crate::chat::message_store::MessageStore;
+use crate::db;
 use axum::{
     extract::{
         State,
@@ -7,14 +9,24 @@ use axum::{
     },
     response::IntoResponse,
 };
-use crate::db; 
-use crate::auth; 
 use futures_util::{SinkExt, StreamExt};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 use tokio::sync::{Mutex, mpsc};
+
+#[derive(serde::Deserialize)]
+struct ProfilePayload {
+    display_name: String,
+    bio: String,
+}
+
+#[derive(serde::Deserialize)]
+struct PasswordPayload {
+    old_password: String,
+    new_password: String,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -48,6 +60,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     });
 
     let mut username = String::new();
+    let mut user_session: Option<UserSession> = None;
     let mut joined_rooms: HashSet<String> = HashSet::new();
 
     // Vòng lặp nhận tin nhắn từ client
@@ -59,30 +72,64 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 };
 
                 // Kiểm tra Đăng nhập / Đăng ký / Xác thực session
-                if !ensure_registered(&state, &client_tx, &mut username, &msg).await {
+                if !ensure_registered(&state, &client_tx, &mut username, &mut user_session, &msg)
+                    .await
+                {
                     continue;
                 }
 
+                let Some(session) = user_session.as_ref() else {
+                    continue;
+                };
+
                 match msg.msg_type.as_str() {
                     "join" => {
-                        handle_join(&state, &client_tx, &username, &mut joined_rooms, &msg.room)
+                        handle_join(&state, &client_tx, session, &mut joined_rooms, &msg.room)
                             .await;
                     }
                     "message" => {
-                        handle_message(&state, &client_tx, &username, &joined_rooms, &msg).await;
+                        handle_message(&state, &client_tx, session, &joined_rooms, &msg).await;
                     }
                     "media" => {
-                        handle_media(&state, &client_tx, &username, &joined_rooms, &msg).await;
+                        handle_media(&state, &client_tx, session, &joined_rooms, &msg).await;
                     }
                     "delete" => {
-                        handle_delete(&state, &client_tx, &username, &msg).await;
+                        handle_delete(&state, &client_tx, session, &msg).await;
                     }
                     "edit" => {
-                        handle_edit(&state, &client_tx, &username, &msg).await;
+                        handle_edit(&state, &client_tx, session, &msg).await;
                     }
                     "leave" => {
                         handle_leave(&state, &username, &mut joined_rooms, &msg.room).await;
                     }
+                    "profile_get" => handle_profile_get(&client_tx, session).await,
+                    "profile_update" => handle_profile_update(&client_tx, session, &msg).await,
+                    "friend_search" => handle_friend_search(&client_tx, session, &msg).await,
+                    "friend_request" => handle_friend_request(&client_tx, session, &msg).await,
+                    "friend_accept" => handle_friend_respond(&client_tx, session, &msg, true).await,
+                    "friend_decline" => {
+                        handle_friend_respond(&client_tx, session, &msg, false).await
+                    }
+                    "friends_list" => send_friends_list(&client_tx, session).await,
+                    "group_create" => handle_group_create(&client_tx, session, &msg).await,
+                    "group_invite" => handle_group_invite(&client_tx, session, &msg).await,
+                    "group_invite_accept" => {
+                        handle_group_invite_accept(&client_tx, session, &msg).await
+                    }
+                    "group_join_request" => {
+                        handle_group_join_request(&client_tx, session, &msg).await
+                    }
+                    "group_join_accept" => {
+                        handle_group_join_respond(&client_tx, session, &msg, true).await
+                    }
+                    "group_join_decline" => {
+                        handle_group_join_respond(&client_tx, session, &msg, false).await
+                    }
+                    "groups_list" => send_groups_list(&client_tx, session).await,
+                    "settings_change_password" => {
+                        handle_change_password(&client_tx, session, &msg).await
+                    }
+                    "logout" => break,
                     _ => {}
                 }
             }
@@ -104,6 +151,7 @@ async fn ensure_registered(
     state: &AppState,
     client_tx: &mpsc::UnboundedSender<ChatMessage>,
     current_username: &mut String,
+    current_session: &mut Option<UserSession>,
     msg: &ChatMessage,
 ) -> bool {
     let requested_username = msg.username.trim();
@@ -123,10 +171,12 @@ async fn ensure_registered(
             "register" => {
                 let mut user_exists = false;
                 {
-                    let check_query = db_client.query(
-                        "SELECT username FROM Users WHERE username = @P1",
-                        &[&requested_username],
-                    ).await;
+                    let check_query = db_client
+                        .query(
+                            "SELECT username FROM Users WHERE username = @P1",
+                            &[&requested_username],
+                        )
+                        .await;
 
                     match check_query {
                         Ok(stream) => {
@@ -140,7 +190,7 @@ async fn ensure_registered(
                             return false;
                         }
                     }
-                } 
+                }
 
                 if user_exists {
                     send_local_error(client_tx, "Tên đăng nhập đã tồn tại");
@@ -156,7 +206,7 @@ async fn ensure_registered(
                         ..Default::default()
                     };
                     let _ = client_tx.send(success_msg);
-                    return false; 
+                    return false;
                 } else {
                     send_local_error(client_tx, "Không thể tạo tài khoản");
                     return false;
@@ -164,7 +214,9 @@ async fn ensure_registered(
             }
 
             "login" => {
-                if auth::login(&mut db_client, requested_username, &msg.password).await {
+                if let Some(session) =
+                    auth::login(&mut db_client, requested_username, &msg.password).await
+                {
                     let mut clients = state.clients.lock().await;
 
                     if clients.contains_key(requested_username) {
@@ -173,21 +225,25 @@ async fn ensure_registered(
                     }
 
                     clients.insert(requested_username.to_string(), client_tx.clone());
-                    *current_username = requested_username.to_string();
+                    *current_username = session.username.clone();
                     drop(clients);
-                    
+
                     send_all_private_chat_history(state, client_tx, requested_username).await;
-                    
+
                     // Gửi tin nhắn chào mừng
                     let welcome = ChatMessage {
                         msg_type: "system".to_string(),
                         username: "System".to_string(),
-                        content: format!("Đăng nhập thành công! Chào mừng {}", requested_username),
+                        content: format!(
+                            "Đăng nhập thành công! Chào mừng {} ({})",
+                            requested_username, session.role
+                        ),
                         room: "general".to_string(),
                         ..Default::default()
                     };
                     let _ = client_tx.send(welcome);
-                    
+                    *current_session = Some(session);
+
                     return true;
                 } else {
                     send_local_error(client_tx, "Sai tên đăng nhập hoặc mật khẩu");
@@ -213,10 +269,16 @@ async fn ensure_registered(
 async fn handle_message(
     state: &AppState,
     client_tx: &mpsc::UnboundedSender<ChatMessage>,
-    username: &str,
+    session: &UserSession,
     joined_rooms: &HashSet<String>,
     msg: &ChatMessage,
 ) {
+    let username = &session.username;
+    if !session.has_permission("chat.send") {
+        send_local_error(client_tx, "You do not have permission to send messages");
+        return;
+    }
+
     if msg.room.trim().is_empty() {
         send_local_error(client_tx, "Room name is required");
         return;
@@ -226,6 +288,27 @@ async fn handle_message(
     if is_private_room(&msg.room) && !private_room_contains_user(&msg.room, username) {
         send_local_error(client_tx, "Access denied to private room");
         return;
+    }
+
+    if is_private_room(&msg.room) {
+        let target = private_room_participants(&msg.room)
+            .into_iter()
+            .find(|p| p != username)
+            .unwrap_or_default();
+        if target.is_empty() || !db::are_friends(username, &target).await.unwrap_or(false) {
+            send_local_error(client_tx, "Only friends can use private chat");
+            return;
+        }
+    }
+
+    if let Some(group_name) = group_room_name(&msg.room) {
+        if !db::is_group_member(group_name, session.user_id)
+            .await
+            .unwrap_or(false)
+        {
+            send_local_error(client_tx, "Join the group before sending messages");
+            return;
+        }
     }
 
     if !is_private_room(&msg.room) && !joined_rooms.contains(&msg.room) {
@@ -245,30 +328,14 @@ async fn handle_message(
     chat_msg.password = String::new();
 
     // --- LƯU VÀO SQL SERVER (Async Task) ---
-    let db_msg = chat_msg.clone();
-    tokio::spawn(async move {
-        // Gọi hàm kết nối từ db.rs
-        match db::get_db_client().await {
-            Ok(mut client) => {
-                // Thực thi câu lệnh SQL
-                let result = client.execute(
-                    "INSERT INTO ChatHistory (sender, message, room, created_at) VALUES (@P1, @P2, @P3, GETDATE())",
-                    &[&db_msg.username, &db_msg.content, &db_msg.room],
-                ).await;
-
-                if let Err(e) = result {
-                    eprintln!("SQL Execute Error: {:?}", e);
-                }
-            },
-            // Chuyển lỗi thành String để thỏa mãn trait Send
-            Err(e) => {
-                eprintln!("SQL Connection Error: {}", e.to_string());
-            }
-        }
-    });
+    if let Err(e) = db::save_chat_message(&chat_msg, session.user_id).await {
+        eprintln!("SQL Execute Error: {:?}", e);
+        send_local_error(client_tx, "Could not save message");
+        return;
+    }
     // Lưu vào cache bộ nhớ và broadcast
     store_room_message(state, chat_msg.clone()).await;
-    
+
     if is_private_room(&msg.room) {
         send_to_private_participants(state, &chat_msg).await;
     } else {
@@ -278,15 +345,48 @@ async fn handle_message(
 
 // --- GIỮ NGUYÊN CÁC HÀM HELPER CỦA BẠN (Join, Leave, Cleanup...) ---
 
-async fn handle_join(state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, username: &str, joined_rooms: &mut HashSet<String>, room: &str) {
+async fn handle_join(
+    state: &AppState,
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    joined_rooms: &mut HashSet<String>,
+    room: &str,
+) {
+    let username = &session.username;
     let room = room.trim();
-    if room.is_empty() { return; }
-    if is_private_room(room) && !private_room_contains_user(room, username) { return; }
+    if room.is_empty() {
+        return;
+    }
+    if is_private_room(room) && !private_room_contains_user(room, username) {
+        return;
+    }
+    if is_private_room(room) {
+        let target = private_room_participants(room)
+            .into_iter()
+            .find(|p| p != username)
+            .unwrap_or_default();
+        if target.is_empty() || !db::are_friends(username, &target).await.unwrap_or(false) {
+            send_local_error(client_tx, "Only friends can use private chat");
+            return;
+        }
+    }
+    if let Some(group_name) = group_room_name(room) {
+        if !db::is_group_member(group_name, session.user_id)
+            .await
+            .unwrap_or(false)
+        {
+            send_local_error(client_tx, "You are not a member of this group");
+            return;
+        }
+    }
 
     if joined_rooms.insert(room.to_string()) {
         if !is_private_room(room) {
             let mut room_members = state.room_members.lock().await;
-            room_members.entry(room.to_string()).or_default().insert(username.to_string());
+            room_members
+                .entry(room.to_string())
+                .or_default()
+                .insert(username.to_string());
         }
     }
     send_history(state, client_tx, room).await;
@@ -295,10 +395,16 @@ async fn handle_join(state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMes
 async fn handle_media(
     state: &AppState,
     client_tx: &mpsc::UnboundedSender<ChatMessage>,
-    username: &str,
+    session: &UserSession,
     joined_rooms: &HashSet<String>,
     msg: &ChatMessage,
 ) {
+    let username = &session.username;
+    if !session.has_permission("chat.media") {
+        send_local_error(client_tx, "You do not have permission to send media");
+        return;
+    }
+
     if msg.room.trim().is_empty() {
         send_local_error(client_tx, "Room name is required");
         return;
@@ -307,19 +413,41 @@ async fn handle_media(
         send_local_error(client_tx, "Media metadata is required");
         return;
     }
-    
+
     // Kiểm tra kích thước file URL (base64 string)
     if let Some(media) = &msg.media {
         let max_size = 10 * 1024 * 1024; // 10MB cho base64 string
         if media.file_url.len() > max_size {
-            send_local_error(client_tx, &format!("File quá lớn! Tối đa 10MB (hiện tại: {})", media.file_size));
+            send_local_error(
+                client_tx,
+                &format!("File quá lớn! Tối đa 10MB (hiện tại: {})", media.file_size),
+            );
             return;
         }
     }
-    
+
     if is_private_room(&msg.room) && !private_room_contains_user(&msg.room, username) {
         send_local_error(client_tx, "Access denied to private room");
         return;
+    }
+    if is_private_room(&msg.room) {
+        let target = private_room_participants(&msg.room)
+            .into_iter()
+            .find(|p| p != username)
+            .unwrap_or_default();
+        if target.is_empty() || !db::are_friends(username, &target).await.unwrap_or(false) {
+            send_local_error(client_tx, "Only friends can use private chat");
+            return;
+        }
+    }
+    if let Some(group_name) = group_room_name(&msg.room) {
+        if !db::is_group_member(group_name, session.user_id)
+            .await
+            .unwrap_or(false)
+        {
+            send_local_error(client_tx, "Join the group before sending media");
+            return;
+        }
     }
     if !is_private_room(&msg.room) && !joined_rooms.contains(&msg.room) {
         send_local_error(client_tx, "Join the room before sending media");
@@ -339,37 +467,11 @@ async fn handle_media(
     chat_msg.media = msg.media.clone();
 
     // --- LƯU VÀO SQL SERVER (Async Task) ---
-    let db_msg = chat_msg.clone();
-    tokio::spawn(async move {
-        match crate::db::get_db_client().await {
-            Ok(mut client) => {
-                let (media_type, file_url, file_name, file_size, mime_type) = if let Some(media) = &db_msg.media {
-                    (
-                        Some(media.media_type.clone()),
-                        Some(media.file_url.clone()),
-                        Some(media.file_name.clone()),
-                        Some(media.file_size as i64),
-                        media.mime_type.clone()
-                    )
-                } else {
-                    (None, None, None, None, None)
-                };
-
-                let result = client.execute(
-                    "INSERT INTO ChatHistory (sender, message, room, created_at, media_type, file_url, file_name, file_size, mime_type) VALUES (@P1, @P2, @P3, GETDATE(), @P4, @P5, @P6, @P7, @P8)",
-                    &[&db_msg.username, &db_msg.content, &db_msg.room,
-                      &media_type, &file_url, &file_name, &file_size, &mime_type],
-                ).await;
-
-                if let Err(e) = result {
-                    eprintln!("SQL Execute Error (Media): {:?}", e);
-                }
-            },
-            Err(e) => {
-                eprintln!("SQL Connection Error: {}", e.to_string());
-            }
-        }
-    });
+    if let Err(e) = db::save_chat_message(&chat_msg, session.user_id).await {
+        eprintln!("SQL Execute Error (Media): {:?}", e);
+        send_local_error(client_tx, "Could not save media message");
+        return;
+    }
 
     store_room_message(state, chat_msg.clone()).await;
     if is_private_room(&msg.room) {
@@ -382,35 +484,48 @@ async fn handle_media(
 async fn handle_delete(
     state: &AppState,
     client_tx: &mpsc::UnboundedSender<ChatMessage>,
-    username: &str,
+    session: &UserSession,
     msg: &ChatMessage,
 ) {
+    let username = &session.username;
+    if !session.has_permission("message.delete.own") {
+        send_local_error(client_tx, "You do not have permission to delete messages");
+        return;
+    }
+
     if msg.message_id.trim().is_empty() {
         send_local_error(client_tx, "Message ID is required for deletion");
         return;
     }
-    if !state.message_store.can_modify_message(&msg.message_id, username).await {
-        send_local_error(client_tx, "You are not allowed to delete this message");
-        return;
-    }
-
-    if let Some(edited) = state.message_store.delete_message(&msg.message_id).await {
-        if is_private_room(&edited.room) {
-            send_to_private_participants(state, &edited).await;
-        } else {
-            send_to_room_members(state, &edited.room, &edited).await;
+    match db::delete_message(&msg.message_id, username).await {
+        Ok(Some(edited)) => {
+            let _ = state.message_store.delete_message(&msg.message_id).await;
+            if is_private_room(&edited.room) {
+                send_to_private_participants(state, &edited).await;
+            } else {
+                send_to_room_members(state, &edited.room, &edited).await;
+            }
         }
-    } else {
-        send_local_error(client_tx, "Message not found or already deleted");
+        Ok(None) => send_local_error(client_tx, "Message not found or already deleted"),
+        Err(e) => {
+            eprintln!("SQL Delete Error: {:?}", e);
+            send_local_error(client_tx, "Could not delete message");
+        }
     }
 }
 
 async fn handle_edit(
     state: &AppState,
     client_tx: &mpsc::UnboundedSender<ChatMessage>,
-    username: &str,
+    session: &UserSession,
     msg: &ChatMessage,
 ) {
+    let username = &session.username;
+    if !session.has_permission("message.edit.own") {
+        send_local_error(client_tx, "You do not have permission to edit messages");
+        return;
+    }
+
     if msg.message_id.trim().is_empty() {
         send_local_error(client_tx, "Message ID is required for edit");
         return;
@@ -419,24 +534,252 @@ async fn handle_edit(
         send_local_error(client_tx, "New content is required for edit");
         return;
     }
-    if !state.message_store.can_modify_message(&msg.message_id, username).await {
-        send_local_error(client_tx, "You are not allowed to edit this message");
-        return;
-    }
-
-    if let Some(edited) = state.message_store.edit_message(&msg.message_id, &msg.content).await {
-        if is_private_room(&edited.room) {
-            send_to_private_participants(state, &edited).await;
-        } else {
-            send_to_room_members(state, &edited.room, &edited).await;
+    match db::edit_message(&msg.message_id, username, &msg.content).await {
+        Ok(Some(edited)) => {
+            let _ = state
+                .message_store
+                .edit_message(&msg.message_id, &msg.content)
+                .await;
+            if is_private_room(&edited.room) {
+                send_to_private_participants(state, &edited).await;
+            } else {
+                send_to_room_members(state, &edited.room, &edited).await;
+            }
         }
-    } else {
-        send_local_error(client_tx, "Message not found or cannot be edited");
+        Ok(None) => send_local_error(client_tx, "Message not found or cannot be edited"),
+        Err(e) => {
+            eprintln!("SQL Edit Error: {:?}", e);
+            send_local_error(client_tx, "Could not edit message");
+        }
     }
 }
 
-async fn handle_leave(state: &AppState, username: &str, joined_rooms: &mut HashSet<String>, room: &str) {
-    if !joined_rooms.remove(room) { return; }
+async fn handle_profile_get(client_tx: &mpsc::UnboundedSender<ChatMessage>, session: &UserSession) {
+    match db::get_profile(session.user_id).await {
+        Ok(profile) => send_json(client_tx, "profile_data", &profile),
+        Err(e) => {
+            eprintln!("Profile Error: {:?}", e);
+            send_local_error(client_tx, "Could not load profile");
+        }
+    }
+}
+
+async fn handle_profile_update(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    if !session.has_permission("profile.update") {
+        send_local_error(client_tx, "You do not have permission to update profile");
+        return;
+    }
+    let Ok(payload) = serde_json::from_str::<ProfilePayload>(&msg.content) else {
+        send_local_error(client_tx, "Invalid profile data");
+        return;
+    };
+    match db::update_profile(session.user_id, &payload.display_name, &payload.bio).await {
+        Ok(profile) => send_json(client_tx, "profile_data", &profile),
+        Err(e) => {
+            eprintln!("Profile Update Error: {:?}", e);
+            send_local_error(client_tx, "Could not update profile");
+        }
+    }
+}
+
+async fn handle_friend_search(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    match db::search_user(msg.target.trim(), session.user_id).await {
+        Ok(result) => send_json(client_tx, "friend_search_result", &result),
+        Err(e) => {
+            eprintln!("Friend Search Error: {:?}", e);
+            send_local_error(client_tx, "Could not search user");
+        }
+    }
+}
+
+async fn handle_friend_request(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    if !session.has_permission("friend.manage") {
+        send_local_error(client_tx, "You do not have permission to manage friends");
+        return;
+    }
+    match db::send_friend_request(session.user_id, msg.target.trim()).await {
+        Ok(()) => {
+            send_system(client_tx, "Da gui loi moi ket ban");
+            send_friends_list(client_tx, session).await;
+        }
+        Err(e) => {
+            eprintln!("Friend Request Error: {:?}", e);
+            send_local_error(client_tx, "Could not send friend request");
+        }
+    }
+}
+
+async fn handle_friend_respond(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+    accept: bool,
+) {
+    match db::respond_friend_request(session.user_id, msg.target.trim(), accept).await {
+        Ok(()) => send_friends_list(client_tx, session).await,
+        Err(e) => {
+            eprintln!("Friend Respond Error: {:?}", e);
+            send_local_error(client_tx, "Could not update friend request");
+        }
+    }
+}
+
+async fn send_friends_list(client_tx: &mpsc::UnboundedSender<ChatMessage>, session: &UserSession) {
+    match db::friend_lists(session.user_id).await {
+        Ok(list) => send_json(client_tx, "friends_data", &list),
+        Err(e) => {
+            eprintln!("Friends List Error: {:?}", e);
+            send_local_error(client_tx, "Could not load friends");
+        }
+    }
+}
+
+async fn handle_group_create(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    if !session.has_permission("group.create") {
+        send_local_error(client_tx, "You do not have permission to create groups");
+        return;
+    }
+    match db::create_group(session.user_id, msg.target.trim()).await {
+        Ok(()) => send_groups_list(client_tx, session).await,
+        Err(e) => {
+            eprintln!("Group Create Error: {:?}", e);
+            send_local_error(client_tx, "Could not create group");
+        }
+    }
+}
+
+async fn handle_group_invite(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    let group_name = group_room_name(&msg.room).unwrap_or(msg.room.trim());
+    match db::group_invite(session.user_id, group_name, msg.target.trim()).await {
+        Ok(()) => send_groups_list(client_tx, session).await,
+        Err(e) => {
+            eprintln!("Group Invite Error: {:?}", e);
+            send_local_error(client_tx, "Could not invite user");
+        }
+    }
+}
+
+async fn handle_group_invite_accept(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    match db::group_invite_accept(session.user_id, msg.target.trim()).await {
+        Ok(()) => send_groups_list(client_tx, session).await,
+        Err(e) => {
+            eprintln!("Group Invite Accept Error: {:?}", e);
+            send_local_error(client_tx, "Could not accept group invite");
+        }
+    }
+}
+
+async fn handle_group_join_request(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    match db::group_join_request(session.user_id, msg.target.trim()).await {
+        Ok(()) => {
+            send_system(client_tx, "Da gui yeu cau vao nhom");
+            send_groups_list(client_tx, session).await;
+        }
+        Err(e) => {
+            eprintln!("Group Join Request Error: {:?}", e);
+            send_local_error(client_tx, "Could not request group access");
+        }
+    }
+}
+
+async fn handle_group_join_respond(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+    accept: bool,
+) {
+    let group_name = group_room_name(&msg.room).unwrap_or(msg.room.trim());
+    match db::group_join_respond(session.user_id, group_name, msg.target.trim(), accept).await {
+        Ok(()) => send_groups_list(client_tx, session).await,
+        Err(e) => {
+            eprintln!("Group Join Respond Error: {:?}", e);
+            send_local_error(client_tx, "Could not update join request");
+        }
+    }
+}
+
+async fn send_groups_list(client_tx: &mpsc::UnboundedSender<ChatMessage>, session: &UserSession) {
+    match db::group_lists(session.user_id).await {
+        Ok(list) => send_json(client_tx, "groups_data", &list),
+        Err(e) => {
+            eprintln!("Groups List Error: {:?}", e);
+            send_local_error(client_tx, "Could not load groups");
+        }
+    }
+}
+
+async fn handle_change_password(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    if !session.has_permission("settings.update_password") {
+        send_local_error(client_tx, "You do not have permission to update password");
+        return;
+    }
+    let Ok(payload) = serde_json::from_str::<PasswordPayload>(&msg.content) else {
+        send_local_error(client_tx, "Invalid password data");
+        return;
+    };
+    let mut client = match db::get_db_client().await {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Password DB Error: {:?}", e);
+            send_local_error(client_tx, "Could not connect to database");
+            return;
+        }
+    };
+    if auth::change_password(
+        &mut client,
+        session.user_id,
+        &payload.old_password,
+        &payload.new_password,
+    )
+    .await
+    {
+        send_system(client_tx, "Doi mat khau thanh cong");
+    } else {
+        send_local_error(client_tx, "Old password is incorrect");
+    }
+}
+
+async fn handle_leave(
+    state: &AppState,
+    username: &str,
+    joined_rooms: &mut HashSet<String>,
+    room: &str,
+) {
+    if !joined_rooms.remove(room) {
+        return;
+    }
     if !is_private_room(room) {
         let mut room_members = state.room_members.lock().await;
         if let Some(members) = room_members.get_mut(room) {
@@ -446,16 +789,23 @@ async fn handle_leave(state: &AppState, username: &str, joined_rooms: &mut HashS
 }
 
 async fn cleanup_connection(state: &AppState, username: &str, _joined_rooms: &HashSet<String>) {
-    if username.is_empty() { return; }
+    if username.is_empty() {
+        return;
+    }
     let mut clients = state.clients.lock().await;
     clients.remove(username);
     // ... logic notify system leave (giữ nguyên của bạn) ...
 }
 
-async fn send_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, room: &str) {
+async fn send_history(
+    state: &AppState,
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    room: &str,
+) {
     match db::get_room_history(room).await {
         Ok(messages) => {
             for msg in messages {
+                state.message_store.add_message(msg.clone()).await;
                 let _ = client_tx.send(msg);
             }
         }
@@ -463,10 +813,15 @@ async fn send_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatM
     }
 }
 
-async fn send_all_private_chat_history(_state: &AppState, client_tx: &mpsc::UnboundedSender<ChatMessage>, username: &str) {
+async fn send_all_private_chat_history(
+    state: &AppState,
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    username: &str,
+) {
     match db::get_private_history(username).await {
         Ok(messages) => {
             for msg in messages {
+                state.message_store.add_message(msg.clone()).await;
                 let _ = client_tx.send(msg);
             }
         }
@@ -483,7 +838,9 @@ async fn store_room_message(state: &AppState, msg: ChatMessage) {
 async fn send_to_room_members(state: &AppState, room: &str, msg: &ChatMessage) {
     let members = {
         let rm = state.room_members.lock().await;
-        rm.get(room).map(|m| m.iter().cloned().collect::<Vec<_>>()).unwrap_or_default()
+        rm.get(room)
+            .map(|m| m.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
     };
     send_to_users(state, members, msg).await;
 }
@@ -495,7 +852,9 @@ async fn send_to_private_participants(state: &AppState, msg: &ChatMessage) {
 async fn send_to_users(state: &AppState, recipients: Vec<String>, msg: &ChatMessage) {
     let clients = state.clients.lock().await;
     for r in recipients {
-        if let Some(tx) = clients.get(&r) { let _ = tx.send(msg.clone()); }
+        if let Some(tx) = clients.get(&r) {
+            let _ = tx.send(msg.clone());
+        }
     }
 }
 
@@ -512,8 +871,52 @@ fn send_local_error(client_tx: &mpsc::UnboundedSender<ChatMessage>, content: &st
     });
 }
 
-fn is_private_room(room: &str) -> bool { room.starts_with("dm:") }
-fn private_room_contains_user(room: &str, user: &str) -> bool { private_room_participants(room).contains(&user.to_string()) }
+fn send_system(client_tx: &mpsc::UnboundedSender<ChatMessage>, content: &str) {
+    let _ = client_tx.send(ChatMessage {
+        msg_type: "system".into(),
+        username: "SYSTEM".into(),
+        content: content.into(),
+        room: "general".into(),
+        ..Default::default()
+    });
+}
+
+fn send_json<T: serde::Serialize>(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    msg_type: &str,
+    payload: &T,
+) {
+    match serde_json::to_string(payload) {
+        Ok(content) => {
+            let _ = client_tx.send(ChatMessage {
+                msg_type: msg_type.into(),
+                username: "SYSTEM".into(),
+                content,
+                room: "general".into(),
+                ..Default::default()
+            });
+        }
+        Err(_) => send_local_error(client_tx, "Could not serialize response"),
+    }
+}
+
+fn is_private_room(room: &str) -> bool {
+    room.starts_with("dm:")
+}
+fn group_room_name(room: &str) -> Option<&str> {
+    room.strip_prefix("group:")
+        .filter(|name| !name.trim().is_empty())
+}
+fn private_room_contains_user(room: &str, user: &str) -> bool {
+    private_room_participants(room).contains(&user.to_string())
+}
 fn private_room_participants(room: &str) -> Vec<String> {
-    room.strip_prefix("dm:").map(|r| r.split(':').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect()).unwrap_or_default()
+    room.strip_prefix("dm:")
+        .map(|r| {
+            r.split(':')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
 }

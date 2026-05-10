@@ -1,5 +1,28 @@
 # API Summary - Media & Message Management Features
 
+## Báo Cáo Tuần
+
+### Tuần qua đã làm được
+- Bổ sung chức năng gửi media gồm hình ảnh, video và file; giao diện cho phép chọn tệp trực tiếp từ máy.
+- Lưu metadata media gồm tên file, kích thước, MIME type và dữ liệu tệp gửi qua WebSocket.
+- Bổ sung chức năng sửa tin nhắn và xóa/thu hồi tin nhắn của chính user gửi.
+- Cải thiện UI cơ bản: hiển thị room, user, media preview và nút thao tác Edit/Del trên tin nhắn của mình.
+- Test hệ thống với nhiều client và kiểm tra build bằng `cargo check`.
+
+### Khó khăn
+- Đồng bộ dữ liệu realtime giữa nhiều client, đặc biệt khi tin nhắn bị sửa hoặc xóa.
+- Xử lý WebSocket đôi lúc chưa ổn định, dễ gặp lỗi khi còn server cũ đang giữ port.
+- Debug async trong Rust với shared state, `Mutex` và các điểm `await`.
+- Gửi file qua WebSocket bằng data URL/base64 chỉ phù hợp file nhỏ; file lớn có thể làm chậm hoặc vượt giới hạn message.
+- Quản lý lịch sử Git sau khi reset/force push cần cẩn thận để tránh mất commit.
+
+### Kế hoạch tuần tới
+- Bắt đầu lưu lịch sử chat bằng database hoặc file để không mất dữ liệu khi restart server.
+- Tách chức năng upload file thành HTTP endpoint riêng thay vì gửi file lớn trực tiếp qua WebSocket.
+- Cải thiện UI: hiển thị thời gian gửi, danh sách user trong room, trạng thái tin nhắn đã sửa/đã xóa rõ hơn.
+- Bổ sung reconnect/error handling cho WebSocket.
+- Test hệ thống với nhiều client hơn, gồm các case gửi media, sửa/xóa tin nhắn và phân quyền tác giả.
+
 ## Files Được Sửa Đổi
 
 ### 1. `src/chat/message.rs`
