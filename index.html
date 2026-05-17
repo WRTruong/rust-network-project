@@ -479,6 +479,129 @@
       font-weight: 600;
     }
 
+    .side-actions {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .side-actions button,
+    .panel button {
+      border: 1px solid var(--border);
+      background: white;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .side-actions button:hover,
+    .panel button:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    .panel {
+      width: 330px;
+      border-left: 1px solid var(--border);
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-header {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .panel-body {
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .panel-section {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-section h4 {
+      margin: 0;
+      font-size: 13px;
+    }
+
+    .panel input,
+    .panel textarea,
+    .panel select {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .panel textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+
+    .list-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px;
+      border-radius: 6px;
+      background: var(--bg);
+      font-size: 13px;
+    }
+
+    .list-title {
+      font-weight: 700;
+    }
+
+    .list-note {
+      color: #777;
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    body.theme-dark {
+      --text: #f1f5f9;
+      --border: #334155;
+      --bg: #172033;
+      background: #0f172a;
+    }
+
+    body.theme-dark .sidebar,
+    body.theme-dark .chat,
+    body.theme-dark .panel,
+    body.theme-dark .login-card,
+    body.theme-dark .msg-action,
+    body.theme-dark .side-actions button,
+    body.theme-dark .panel button,
+    body.theme-dark .panel input,
+    body.theme-dark .panel textarea,
+    body.theme-dark .panel select {
+      background: #111827;
+      color: var(--text);
+    }
+
     @media (max-width: 760px) {
       .media-panel {
         grid-template-columns: 1fr;
@@ -539,6 +662,14 @@
           <button class="btn-new" onclick="createPrivateChat()" style="flex: 1;">Riêng</button>
         </div>
       </div>
+      <div class="side-actions">
+        <button onclick="openPanel('profile')">Profile</button>
+        <button onclick="openPanel('friends')">Friends</button>
+        <button onclick="openPanel('groups')">Groups</button>
+        <button onclick="openPanel('settings')">Settings</button>
+        <button id="admin-panel-btn" class="hidden" onclick="openPanel('admin')">Admin</button>
+        <button onclick="logout()" style="grid-column: span 2;">Logout</button>
+      </div>
       <div id="room-list"></div>
     </div>
 
@@ -565,6 +696,13 @@
         <button class="btn-send" onclick="sendMessage()">Gửi</button>
       </div>
     </div>
+    <div class="panel hidden" id="utility-panel">
+      <div class="panel-header">
+        <h3 id="panel-title">Panel</h3>
+        <button onclick="closePanel()">Close</button>
+      </div>
+      <div class="panel-body" id="panel-body"></div>
+    </div>
   </div>
 
   <script>
@@ -576,6 +714,8 @@
     let editingMessageId = "";
     let suppressCloseAlert = false;
     let isLoginMode = true;
+    let activePanel = "";
+    let currentUserRole = "";
 
     const chatWindow = document.getElementById("chat-window");
     const roomTitle = document.getElementById("room-title");
@@ -589,6 +729,12 @@
     const loginScreen = document.getElementById("login");
     const sidebar = document.getElementById("sidebar");
     const chatScreen = document.getElementById("chat-screen");
+    const utilityPanel = document.getElementById("utility-panel");
+    const panelTitle = document.getElementById("panel-title");
+    const panelBody = document.getElementById("panel-body");
+    const adminPanelBtn = document.getElementById("admin-panel-btn");
+
+    applySavedSettings();
 
     function privateRoomId(left, right) {
         const participants = [left.trim(), right.trim()].sort();
@@ -596,6 +742,7 @@
     }
 
     function isPrivateRoom(room) { return room && room.startsWith("dm:"); }
+    function isGroupRoom(room) { return room && room.startsWith("group:"); }
 
     function getPrivateTarget(room) {
         if (!isPrivateRoom(room)) return "";
@@ -603,7 +750,11 @@
         return participants.find((name) => name !== username) || username;
     }
 
-    function displayRoomName(room) { return isPrivateRoom(room) ? `@${getPrivateTarget(room)}` : room; }
+    function displayRoomName(room) {
+        if (isPrivateRoom(room)) return `@${getPrivateTarget(room)}`;
+        if (isGroupRoom(room)) return `# ${room.replace("group:", "")}`;
+        return room;
+    }
 
     function roomAvatar(room) {
         const label = displayRoomName(room);
@@ -716,8 +867,274 @@
         ws.send(JSON.stringify(authData));
     }
 
+    function sendAction(msg_type, { content = "", target = "", room = "general" } = {}) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert("Mat ket noi toi server");
+        return;
+      }
+      ws.send(JSON.stringify({ msg_type, username, password: "", content, room, target, users: [] }));
+    }
+
+    function requestDashboardData() {
+      sendAction("profile_get");
+    }
+
+    function handleControlMessage(data) {
+      const controlTypes = new Set(["profile_data", "friend_search_result", "friends_data", "groups_data", "admin_users_data"]);
+      if (!controlTypes.has(data.msg_type)) return false;
+      const payload = data.content ? JSON.parse(data.content) : null;
+      if (data.msg_type === "profile_data") {
+        updateAdminVisibility(payload);
+        if (activePanel === "profile") renderProfilePanel(payload);
+      }
+      if (data.msg_type === "friend_search_result") renderFriendSearchResult(payload);
+      if (data.msg_type === "friends_data") renderFriendsPanel(payload);
+      if (data.msg_type === "groups_data") renderGroupsPanel(payload);
+      if (data.msg_type === "admin_users_data") renderAdminPanel(payload);
+      return true;
+    }
+
+    function openPanel(panel) {
+      activePanel = panel;
+      utilityPanel.classList.remove("hidden");
+      if (panel === "profile") {
+        panelTitle.textContent = "Profile";
+        panelBody.innerHTML = "<div class='panel-section'>Dang tai profile...</div>";
+        sendAction("profile_get");
+      } else if (panel === "friends") {
+        panelTitle.textContent = "Friends";
+        renderFriendsPanel({ friends: [], incoming: [], outgoing: [] });
+        sendAction("friends_list");
+      } else if (panel === "groups") {
+        panelTitle.textContent = "Groups";
+        renderGroupsPanel({ groups: [], invites: [], join_requests: [] });
+        sendAction("groups_list");
+      } else if (panel === "admin") {
+        panelTitle.textContent = "Admin";
+        renderAdminPanel({ users: [] });
+        sendAction("admin_users_list");
+      } else {
+        panelTitle.textContent = "Settings";
+        renderSettingsPanel();
+      }
+    }
+
+    function closePanel() {
+      activePanel = "";
+      utilityPanel.classList.add("hidden");
+      panelBody.innerHTML = "";
+    }
+
+    function renderProfilePanel(profile) {
+      if (activePanel && activePanel !== "profile") return;
+      activePanel = "profile";
+      utilityPanel.classList.remove("hidden");
+      panelTitle.textContent = "Profile";
+      updateAdminVisibility(profile);
+      panelBody.innerHTML = `
+        <div class="panel-section">
+          <h4>${escapeHtml(profile.username)} (${escapeHtml(profile.role)})</h4>
+          <input id="profile-display" value="${escapeAttr(profile.display_name || profile.username)}" maxlength="100" placeholder="Ten hien thi">
+          <textarea id="profile-bio" maxlength="500" placeholder="Gioi thieu ngan">${escapeHtml(profile.bio || "")}</textarea>
+          <button onclick="saveProfile()">Save profile</button>
+        </div>`;
+    }
+
+    function saveProfile() {
+      const displayName = document.getElementById("profile-display").value.trim();
+      const bio = document.getElementById("profile-bio").value.trim();
+      sendAction("profile_update", { content: JSON.stringify({ display_name: displayName, bio }) });
+    }
+
+    function updateAdminVisibility(profile) {
+      currentUserRole = profile?.role || "";
+      adminPanelBtn.classList.toggle("hidden", currentUserRole !== "admin");
+    }
+
+    function renderFriendsPanel(data) {
+      if (activePanel && activePanel !== "friends") return;
+      activePanel = "friends";
+      utilityPanel.classList.remove("hidden");
+      panelTitle.textContent = "Friends";
+      panelBody.innerHTML = `
+        <div class="panel-section">
+          <h4>Find user</h4>
+          <input id="friend-search" placeholder="username">
+          <button onclick="searchFriend()">Search</button>
+          <div id="friend-search-result"></div>
+        </div>
+        <div class="panel-section"><h4>Friends</h4>${renderUserRows(data.friends || [], (u) => `<button onclick="joinRoom(privateRoomId(username, '${escapeJs(u.username)}'))">DM</button>`)}</div>
+        <div class="panel-section"><h4>Incoming requests</h4>${renderUserRows(data.incoming || [], (u) => `<button onclick="friendRespond('${escapeJs(u.username)}', true)">Accept</button><button onclick="friendRespond('${escapeJs(u.username)}', false)">Decline</button>`)}</div>
+        <div class="panel-section"><h4>Outgoing requests</h4>${renderUserRows(data.outgoing || [], () => `<span class="list-note">Pending</span>`)}</div>`;
+    }
+
+    function searchFriend() {
+      const target = document.getElementById("friend-search").value.trim();
+      if (target) sendAction("friend_search", { target });
+    }
+
+    function renderFriendSearchResult(user) {
+      const box = document.getElementById("friend-search-result");
+      if (!box) return;
+      if (!user) {
+        box.innerHTML = `<div class="list-note">Khong tim thay user</div>`;
+        return;
+      }
+      box.innerHTML = `<div class="list-row"><div><div class="list-title">${escapeHtml(user.display_name || user.username)}</div><div class="list-note">@${escapeHtml(user.username)}</div></div><button onclick="sendFriendRequest('${escapeJs(user.username)}')">Add</button></div>`;
+    }
+
+    function sendFriendRequest(target) { sendAction("friend_request", { target }); }
+    function friendRespond(target, accept) { sendAction(accept ? "friend_accept" : "friend_decline", { target }); }
+
+    function renderGroupsPanel(data) {
+      if (activePanel && activePanel !== "groups") return;
+      activePanel = "groups";
+      utilityPanel.classList.remove("hidden");
+      panelTitle.textContent = "Groups";
+      panelBody.innerHTML = `
+        <div class="panel-section">
+          <h4>Create / Join</h4>
+          <input id="group-name" placeholder="group name">
+          <button onclick="createGroup()">Create group</button>
+          <button onclick="requestJoinGroup()">Request to join</button>
+        </div>
+        <div class="panel-section"><h4>Your groups</h4>${renderGroupRows(data.groups || [])}</div>
+        <div class="panel-section"><h4>Invites</h4>${(data.invites || []).map(g => `<div class="list-row"><div><div class="list-title">${escapeHtml(g.name)}</div><div class="list-note">Owner: ${escapeHtml(g.owner)}</div></div><button onclick="acceptGroupInvite('${escapeJs(g.name)}')">Accept</button></div>`).join("") || "<div class='list-note'>No invites</div>"}</div>
+        <div class="panel-section"><h4>Join requests</h4>${(data.join_requests || []).map(r => `<div class="list-row"><div><div class="list-title">${escapeHtml(r.username)}</div><div class="list-note">${escapeHtml(r.group)}</div></div><div><button onclick="respondGroupJoin('${escapeJs(r.group)}', '${escapeJs(r.username)}', true)">Accept</button><button onclick="respondGroupJoin('${escapeJs(r.group)}', '${escapeJs(r.username)}', false)">Decline</button></div></div>`).join("") || "<div class='list-note'>No requests</div>"}</div>`;
+    }
+
+    function renderGroupRows(groups) {
+      if (!groups.length) return "<div class='list-note'>No groups</div>";
+      return groups.map(g => `<div class="list-row"><div><div class="list-title">${escapeHtml(g.name)}</div><div class="list-note">${escapeHtml(g.role)} - owner ${escapeHtml(g.owner)}</div></div><div><button onclick="joinRoom('group:${escapeJs(g.name)}')">Open</button>${g.role === "owner" ? `<button onclick="inviteToGroup('${escapeJs(g.name)}')">Invite</button>` : ""}</div></div>`).join("");
+    }
+
+    function createGroup() {
+      const name = document.getElementById("group-name").value.trim();
+      if (name) sendAction("group_create", { target: name });
+    }
+    function requestJoinGroup() {
+      const name = document.getElementById("group-name").value.trim();
+      if (name) sendAction("group_join_request", { target: name });
+    }
+    function inviteToGroup(group) {
+      const target = prompt("Username to invite:");
+      if (target) sendAction("group_invite", { room: `group:${group}`, target: target.trim() });
+    }
+    function acceptGroupInvite(group) { sendAction("group_invite_accept", { target: group }); }
+    function respondGroupJoin(group, target, accept) {
+      sendAction(accept ? "group_join_accept" : "group_join_decline", { room: `group:${group}`, target });
+    }
+
+    function renderSettingsPanel() {
+      const theme = localStorage.getItem("chat-theme") || "light";
+      const sound = localStorage.getItem("chat-sound") || "off";
+      panelBody.innerHTML = `
+        <div class="panel-section">
+          <h4>Interface</h4>
+          <select id="setting-theme" onchange="saveUiSettings()"><option value="light" ${theme === "light" ? "selected" : ""}>Light</option><option value="dark" ${theme === "dark" ? "selected" : ""}>Dark</option></select>
+          <select id="setting-sound" onchange="saveUiSettings()"><option value="off" ${sound === "off" ? "selected" : ""}>Sound off</option><option value="on" ${sound === "on" ? "selected" : ""}>Sound on</option></select>
+        </div>
+        <div class="panel-section">
+          <h4>Password</h4>
+          <input id="old-password" type="password" placeholder="Old password">
+          <input id="new-password" type="password" placeholder="New password">
+          <button onclick="changePassword()">Change password</button>
+        </div>`;
+    }
+
+    function saveUiSettings() {
+      localStorage.setItem("chat-theme", document.getElementById("setting-theme").value);
+      localStorage.setItem("chat-sound", document.getElementById("setting-sound").value);
+      applySavedSettings();
+    }
+    function applySavedSettings() {
+      const theme = localStorage.getItem("chat-theme") || "light";
+      document.body.classList.toggle("theme-dark", theme === "dark");
+    }
+    function changePassword() {
+      const oldPassword = document.getElementById("old-password").value;
+      const newPassword = document.getElementById("new-password").value;
+      if (!oldPassword || !newPassword) return alert("Nhap day du mat khau");
+      sendAction("settings_change_password", { content: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) });
+    }
+
+    function renderAdminPanel(data) {
+      if (activePanel && activePanel !== "admin") return;
+      activePanel = "admin";
+      utilityPanel.classList.remove("hidden");
+      panelTitle.textContent = "Admin";
+      panelBody.innerHTML = `
+        <div class="panel-section">
+          <h4>User management</h4>
+          <input id="admin-user-search" placeholder="Search username or display name" onkeypress="if(event.key==='Enter') searchAdminUsers()">
+          <button onclick="searchAdminUsers()">Search</button>
+        </div>
+        <div class="panel-section">
+          <h4>Users</h4>
+          ${renderAdminUserRows(data.users || [])}
+        </div>`;
+    }
+
+    function renderAdminUserRows(users) {
+      if (!users.length) return "<div class='list-note'>No users</div>";
+      return users.map(user => {
+        const activeId = `admin-active-${user.id}`;
+        const roleId = `admin-role-${user.id}`;
+        return `
+          <div class="list-row">
+            <div>
+              <div class="list-title">${escapeHtml(user.display_name || user.username)}</div>
+              <div class="list-note">@${escapeHtml(user.username)} - ${escapeHtml(user.is_active ? "active" : "inactive")}</div>
+              <div class="list-note">Created ${escapeHtml(formatAdminDate(user.created_at))}${user.last_login_at ? ` - Last login ${escapeHtml(formatAdminDate(user.last_login_at))}` : ""}</div>
+            </div>
+            <div>
+              <select id="${roleId}">
+                <option value="user" ${user.role === "user" ? "selected" : ""}>user</option>
+                <option value="admin" ${user.role === "admin" ? "selected" : ""}>admin</option>
+              </select>
+              <label class="list-note"><input id="${activeId}" type="checkbox" ${user.is_active ? "checked" : ""}> Active</label>
+              <button onclick="saveAdminUser(${user.id})">Save</button>
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    function searchAdminUsers() {
+      const target = document.getElementById("admin-user-search")?.value.trim() || "";
+      sendAction("admin_users_list", { target });
+    }
+
+    function saveAdminUser(userId) {
+      const role = document.getElementById(`admin-role-${userId}`).value;
+      const isActive = document.getElementById(`admin-active-${userId}`).checked;
+      sendAction("admin_user_update", {
+        content: JSON.stringify({ user_id: userId, role, is_active: isActive })
+      });
+    }
+
+    function logout() {
+      suppressCloseAlert = true;
+      if (ws && ws.readyState === WebSocket.OPEN) sendAction("logout");
+      if (ws) ws.close();
+      resetApp();
+    }
+
+    function renderUserRows(users, actionRenderer) {
+      if (!users.length) return "<div class='list-note'>Empty</div>";
+      return users.map(u => `<div class="list-row"><div><div class="list-title">${escapeHtml(u.display_name || u.username)}</div><div class="list-note">@${escapeHtml(u.username)}</div></div><div>${actionRenderer(u)}</div></div>`).join("");
+    }
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+    }
+    function escapeAttr(value) { return escapeHtml(value).replace(/`/g, "&#096;"); }
+    function escapeJs(value) { return String(value ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
+
     function handleServerMessage(e) {
         const data = JSON.parse(e.data);
+
+        if (handleControlMessage(data)) {
+            return;
+        }
 
         if (data.msg_type === "error") {
             alert("Thông báo: " + data.content);
@@ -733,6 +1150,7 @@
                 sidebar.classList.remove("hidden");
                 chatScreen.classList.remove("hidden");
                 joinRoom("general");
+                requestDashboardData();
             }
         }
 
@@ -757,9 +1175,12 @@
       currentRoom = null;
       joinedRooms = new Map();
       lastUser = "";
+      currentUserRole = "";
       suppressCloseAlert = false;
+      adminPanelBtn.classList.add("hidden");
       roomList.innerHTML = "";
       chatWindow.innerHTML = '<div class="empty"></div>';
+      closePanel();
       loginScreen.classList.remove("hidden");
       sidebar.classList.add("hidden");
       chatScreen.classList.add("hidden");
@@ -789,7 +1210,9 @@
       currentRoom = room;
       lastUser = "";
       cancelEdit();
-      roomTitle.textContent = isPrivateRoom(room) ? displayRoomName(room) : `# ${room}`;
+      roomTitle.textContent = isPrivateRoom(room)
+        ? displayRoomName(room)
+        : (displayRoomName(room).startsWith("#") ? displayRoomName(room) : `# ${displayRoomName(room)}`);
       renderSidebar();
       renderMessages();
     }
@@ -909,7 +1332,12 @@
         if (msg.msg_type === "edited") {
           const meta = document.createElement("div");
           meta.className = "msg-meta";
-          meta.textContent = "da sua";
+          meta.textContent = `da sua${msg.timestamp ? " - " + formatMessageTime(msg.timestamp) : ""}`;
+          msgEl.appendChild(meta);
+        } else if (msg.timestamp) {
+          const meta = document.createElement("div");
+          meta.className = "msg-meta";
+          meta.textContent = formatMessageTime(msg.timestamp);
           msgEl.appendChild(meta);
         }
         if (msg.username === username && canModifyMessage(msg)) {
@@ -1177,6 +1605,29 @@
       const units = ["B", "KB", "MB", "GB"];
       const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
       return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+    }
+
+    function formatMessageTime(timestamp) {
+      const date = new Date(timestamp * 1000);
+      if (Number.isNaN(date.getTime())) return "";
+      const now = new Date();
+      const sameDay = date.getFullYear() === now.getFullYear()
+        && date.getMonth() === now.getMonth()
+        && date.getDate() === now.getDate();
+      const hhmm = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+      if (sameDay) return hhmm;
+      return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${hhmm}`;
+    }
+
+    function formatAdminDate(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    }
+
+    function pad2(value) {
+      return String(value).padStart(2, "0");
     }
 
     function detectMediaType(file) {
