@@ -1,7 +1,7 @@
 use crate::chat::message::{ChatMessage, MediaInfo};
 use serde::Serialize;
 use std::env;
-use tiberius::{AuthMethod, Client, Config, SqlBrowser};
+use tiberius::{AuthMethod, Client, Config, EncryptionLevel, SqlBrowser};
 use tokio::net::TcpStream;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
@@ -20,6 +20,22 @@ pub struct UserSummary {
     pub username: String,
     pub display_name: String,
     pub bio: String,
+}
+
+#[derive(Serialize)]
+pub struct AdminUserSummary {
+    pub id: i32,
+    pub username: String,
+    pub display_name: String,
+    pub role: String,
+    pub is_active: bool,
+    pub created_at: String,
+    pub last_login_at: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AdminUserList {
+    pub users: Vec<AdminUserSummary>,
 }
 
 #[derive(Serialize)]
@@ -73,6 +89,7 @@ pub async fn get_db_client() -> Result<Client<Compat<TcpStream>>, DbError> {
     }
     config.database(database);
     config.authentication(AuthMethod::sql_server(user, password));
+    config.encryption(EncryptionLevel::NotSupported);
     config.trust_cert();
 
     let tcp = if configured_port.is_none() && instance_name.is_some() {
@@ -155,6 +172,66 @@ pub async fn update_profile(
         .await?;
 
     get_profile(user_id).await
+}
+
+pub async fn admin_list_users(query: &str) -> Result<AdminUserList, DbError> {
+    let mut client = get_db_client().await?;
+    let search = query.trim();
+    let pattern = format!("%{}%", search);
+    let rows = client
+        .query(
+            "SELECT TOP 100 u.id,
+                    u.username,
+                    COALESCE(u.display_name, u.username),
+                    r.name,
+                    u.is_active,
+                    CONVERT(VARCHAR(19), u.created_at, 126),
+                    CONVERT(VARCHAR(19), u.last_login_at, 126)
+             FROM Users u
+             JOIN Roles r ON r.id = u.role_id
+             WHERE @P1 = N''
+                OR u.username LIKE @P2
+                OR COALESCE(u.display_name, u.username) LIKE @P2
+             ORDER BY u.created_at DESC, u.username ASC",
+            &[&search, &pattern],
+        )
+        .await?
+        .into_first_result()
+        .await?;
+
+    Ok(AdminUserList {
+        users: rows.into_iter().map(admin_user_summary_from_row).collect(),
+    })
+}
+
+pub async fn admin_update_user(
+    user_id: i32,
+    role: &str,
+    is_active: bool,
+) -> Result<AdminUserList, DbError> {
+    let role = role.trim();
+    if role != "admin" && role != "user" {
+        return Err("invalid role".into());
+    }
+
+    let mut client = get_db_client().await?;
+    let result = client
+        .execute(
+            "UPDATE Users
+             SET role_id = (SELECT id FROM Roles WHERE name = @P1),
+                 is_active = @P2,
+                 updated_at = SYSUTCDATETIME()
+             WHERE id = @P3
+               AND EXISTS (SELECT 1 FROM Roles WHERE name = @P1)",
+            &[&role, &is_active, &user_id],
+        )
+        .await?;
+
+    if result.rows_affected().iter().sum::<u64>() == 0 {
+        return Err("user not found".into());
+    }
+
+    admin_list_users("").await
 }
 
 pub async fn search_user(
@@ -329,10 +406,12 @@ pub async fn get_room_history(room: &str) -> Result<Vec<ChatMessage>, DbError> {
     let stream = client
         .query(
             "SELECT message_id, sender, message, room, msg_type, is_deleted,
-                    media_type, file_url, file_name, file_size, mime_type
+                    media_type, file_url, file_name, file_size, mime_type, created_timestamp
              FROM (
                  SELECT TOP 50 message_id, sender, message, room, msg_type, is_deleted,
-                               media_type, file_url, file_name, file_size, mime_type, created_at
+                               media_type, file_url, file_name, file_size, mime_type,
+                               DATEDIFF_BIG(SECOND, '1970-01-01', created_at) AS created_timestamp,
+                               created_at
                  FROM ChatHistory
                  WHERE room = @P1
                  ORDER BY created_at DESC
@@ -549,7 +628,8 @@ pub async fn get_private_history(username: &str) -> Result<Vec<ChatMessage>, DbE
     let stream = client
         .query(
             "SELECT message_id, sender, message, room, msg_type, is_deleted,
-                    media_type, file_url, file_name, file_size, mime_type
+                    media_type, file_url, file_name, file_size, mime_type,
+                    DATEDIFF_BIG(SECOND, '1970-01-01', created_at)
              FROM ChatHistory
              WHERE (room LIKE 'dm:' + @P1 + ':%' OR room LIKE 'dm:%:' + @P2)
              ORDER BY created_at ASC",
@@ -635,7 +715,8 @@ async fn get_message_by_id(message_id: &str) -> Result<Option<ChatMessage>, DbEr
     let stream = client
         .query(
             "SELECT message_id, sender, message, room, msg_type, is_deleted,
-                    media_type, file_url, file_name, file_size, mime_type
+                    media_type, file_url, file_name, file_size, mime_type,
+                    DATEDIFF_BIG(SECOND, '1970-01-01', created_at)
              FROM ChatHistory
              WHERE message_id = @P1",
             &[&message_id],
@@ -745,6 +826,18 @@ fn user_summary_from_row(row: tiberius::Row) -> UserSummary {
     }
 }
 
+fn admin_user_summary_from_row(row: tiberius::Row) -> AdminUserSummary {
+    AdminUserSummary {
+        id: row.get::<i32, _>(0).unwrap_or_default(),
+        username: row.get::<&str, _>(1).unwrap_or("").to_string(),
+        display_name: row.get::<&str, _>(2).unwrap_or("").to_string(),
+        role: row.get::<&str, _>(3).unwrap_or("").to_string(),
+        is_active: row.get::<bool, _>(4).unwrap_or(false),
+        created_at: row.get::<&str, _>(5).unwrap_or("").to_string(),
+        last_login_at: row.get::<&str, _>(6).map(|value| value.to_string()),
+    }
+}
+
 fn group_summary_from_row(row: tiberius::Row) -> GroupSummary {
     GroupSummary {
         name: row.get::<&str, _>(0).unwrap_or("").to_string(),
@@ -786,6 +879,10 @@ fn rows_to_messages(rows: Vec<tiberius::Row>) -> Result<Vec<ChatMessage>, DbErro
         let msg_type: &str = row.get(4).unwrap_or("message");
         let is_deleted: bool = row.get(5).unwrap_or(false);
         let media_type: Option<&str> = row.get(6);
+        let timestamp = row
+            .get::<i64, _>(11)
+            .map(|value| value.max(0) as u64)
+            .unwrap_or_default();
 
         let mut chat_msg = ChatMessage {
             msg_type: if is_deleted {
@@ -797,6 +894,7 @@ fn rows_to_messages(rows: Vec<tiberius::Row>) -> Result<Vec<ChatMessage>, DbErro
             content: message.to_string(),
             room: room.to_string(),
             message_id: message_id.to_string(),
+            timestamp,
             ..Default::default()
         };
 

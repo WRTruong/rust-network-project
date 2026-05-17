@@ -28,6 +28,13 @@ struct PasswordPayload {
     new_password: String,
 }
 
+#[derive(serde::Deserialize)]
+struct AdminUserUpdatePayload {
+    user_id: i32,
+    role: String,
+    is_active: bool,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub clients: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<ChatMessage>>>>,
@@ -128,6 +135,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     "groups_list" => send_groups_list(&client_tx, session).await,
                     "settings_change_password" => {
                         handle_change_password(&client_tx, session, &msg).await
+                    }
+                    "admin_users_list" => handle_admin_users_list(&client_tx, session, &msg).await,
+                    "admin_user_update" => {
+                        handle_admin_user_update(&client_tx, session, &msg).await
                     }
                     "logout" => break,
                     _ => {}
@@ -768,6 +779,49 @@ async fn handle_change_password(
         send_system(client_tx, "Doi mat khau thanh cong");
     } else {
         send_local_error(client_tx, "Old password is incorrect");
+    }
+}
+
+async fn handle_admin_users_list(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    if !session.has_permission("admin.manage_users") {
+        send_local_error(client_tx, "You do not have permission to manage users");
+        return;
+    }
+
+    match db::admin_list_users(msg.target.trim()).await {
+        Ok(list) => send_json(client_tx, "admin_users_data", &list),
+        Err(e) => {
+            eprintln!("Admin Users List Error: {:?}", e);
+            send_local_error(client_tx, "Could not load users");
+        }
+    }
+}
+
+async fn handle_admin_user_update(
+    client_tx: &mpsc::UnboundedSender<ChatMessage>,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    if !session.has_permission("admin.manage_users") {
+        send_local_error(client_tx, "You do not have permission to manage users");
+        return;
+    }
+
+    let Ok(payload) = serde_json::from_str::<AdminUserUpdatePayload>(&msg.content) else {
+        send_local_error(client_tx, "Invalid user update data");
+        return;
+    };
+
+    match db::admin_update_user(payload.user_id, &payload.role, payload.is_active).await {
+        Ok(list) => send_json(client_tx, "admin_users_data", &list),
+        Err(e) => {
+            eprintln!("Admin User Update Error: {:?}", e);
+            send_local_error(client_tx, "Could not update user");
+        }
     }
 }
 

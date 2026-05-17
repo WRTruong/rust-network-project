@@ -667,6 +667,7 @@
         <button onclick="openPanel('friends')">Friends</button>
         <button onclick="openPanel('groups')">Groups</button>
         <button onclick="openPanel('settings')">Settings</button>
+        <button id="admin-panel-btn" class="hidden" onclick="openPanel('admin')">Admin</button>
         <button onclick="logout()" style="grid-column: span 2;">Logout</button>
       </div>
       <div id="room-list"></div>
@@ -714,6 +715,7 @@
     let suppressCloseAlert = false;
     let isLoginMode = true;
     let activePanel = "";
+    let currentUserRole = "";
 
     const chatWindow = document.getElementById("chat-window");
     const roomTitle = document.getElementById("room-title");
@@ -730,6 +732,7 @@
     const utilityPanel = document.getElementById("utility-panel");
     const panelTitle = document.getElementById("panel-title");
     const panelBody = document.getElementById("panel-body");
+    const adminPanelBtn = document.getElementById("admin-panel-btn");
 
     applySavedSettings();
 
@@ -874,18 +877,20 @@
 
     function requestDashboardData() {
       sendAction("profile_get");
-      sendAction("friends_list");
-      sendAction("groups_list");
     }
 
     function handleControlMessage(data) {
-      const controlTypes = new Set(["profile_data", "friend_search_result", "friends_data", "groups_data"]);
+      const controlTypes = new Set(["profile_data", "friend_search_result", "friends_data", "groups_data", "admin_users_data"]);
       if (!controlTypes.has(data.msg_type)) return false;
       const payload = data.content ? JSON.parse(data.content) : null;
-      if (data.msg_type === "profile_data") renderProfilePanel(payload);
+      if (data.msg_type === "profile_data") {
+        updateAdminVisibility(payload);
+        if (activePanel === "profile") renderProfilePanel(payload);
+      }
       if (data.msg_type === "friend_search_result") renderFriendSearchResult(payload);
       if (data.msg_type === "friends_data") renderFriendsPanel(payload);
       if (data.msg_type === "groups_data") renderGroupsPanel(payload);
+      if (data.msg_type === "admin_users_data") renderAdminPanel(payload);
       return true;
     }
 
@@ -904,6 +909,10 @@
         panelTitle.textContent = "Groups";
         renderGroupsPanel({ groups: [], invites: [], join_requests: [] });
         sendAction("groups_list");
+      } else if (panel === "admin") {
+        panelTitle.textContent = "Admin";
+        renderAdminPanel({ users: [] });
+        sendAction("admin_users_list");
       } else {
         panelTitle.textContent = "Settings";
         renderSettingsPanel();
@@ -921,6 +930,7 @@
       activePanel = "profile";
       utilityPanel.classList.remove("hidden");
       panelTitle.textContent = "Profile";
+      updateAdminVisibility(profile);
       panelBody.innerHTML = `
         <div class="panel-section">
           <h4>${escapeHtml(profile.username)} (${escapeHtml(profile.role)})</h4>
@@ -934,6 +944,11 @@
       const displayName = document.getElementById("profile-display").value.trim();
       const bio = document.getElementById("profile-bio").value.trim();
       sendAction("profile_update", { content: JSON.stringify({ display_name: displayName, bio }) });
+    }
+
+    function updateAdminVisibility(profile) {
+      currentUserRole = profile?.role || "";
+      adminPanelBtn.classList.toggle("hidden", currentUserRole !== "admin");
     }
 
     function renderFriendsPanel(data) {
@@ -1042,6 +1057,61 @@
       if (!oldPassword || !newPassword) return alert("Nhap day du mat khau");
       sendAction("settings_change_password", { content: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) });
     }
+
+    function renderAdminPanel(data) {
+      if (activePanel && activePanel !== "admin") return;
+      activePanel = "admin";
+      utilityPanel.classList.remove("hidden");
+      panelTitle.textContent = "Admin";
+      panelBody.innerHTML = `
+        <div class="panel-section">
+          <h4>User management</h4>
+          <input id="admin-user-search" placeholder="Search username or display name" onkeypress="if(event.key==='Enter') searchAdminUsers()">
+          <button onclick="searchAdminUsers()">Search</button>
+        </div>
+        <div class="panel-section">
+          <h4>Users</h4>
+          ${renderAdminUserRows(data.users || [])}
+        </div>`;
+    }
+
+    function renderAdminUserRows(users) {
+      if (!users.length) return "<div class='list-note'>No users</div>";
+      return users.map(user => {
+        const activeId = `admin-active-${user.id}`;
+        const roleId = `admin-role-${user.id}`;
+        return `
+          <div class="list-row">
+            <div>
+              <div class="list-title">${escapeHtml(user.display_name || user.username)}</div>
+              <div class="list-note">@${escapeHtml(user.username)} - ${escapeHtml(user.is_active ? "active" : "inactive")}</div>
+              <div class="list-note">Created ${escapeHtml(formatAdminDate(user.created_at))}${user.last_login_at ? ` - Last login ${escapeHtml(formatAdminDate(user.last_login_at))}` : ""}</div>
+            </div>
+            <div>
+              <select id="${roleId}">
+                <option value="user" ${user.role === "user" ? "selected" : ""}>user</option>
+                <option value="admin" ${user.role === "admin" ? "selected" : ""}>admin</option>
+              </select>
+              <label class="list-note"><input id="${activeId}" type="checkbox" ${user.is_active ? "checked" : ""}> Active</label>
+              <button onclick="saveAdminUser(${user.id})">Save</button>
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    function searchAdminUsers() {
+      const target = document.getElementById("admin-user-search")?.value.trim() || "";
+      sendAction("admin_users_list", { target });
+    }
+
+    function saveAdminUser(userId) {
+      const role = document.getElementById(`admin-role-${userId}`).value;
+      const isActive = document.getElementById(`admin-active-${userId}`).checked;
+      sendAction("admin_user_update", {
+        content: JSON.stringify({ user_id: userId, role, is_active: isActive })
+      });
+    }
+
     function logout() {
       suppressCloseAlert = true;
       if (ws && ws.readyState === WebSocket.OPEN) sendAction("logout");
@@ -1080,6 +1150,7 @@
                 sidebar.classList.remove("hidden");
                 chatScreen.classList.remove("hidden");
                 joinRoom("general");
+                requestDashboardData();
             }
         }
 
@@ -1104,7 +1175,9 @@
       currentRoom = null;
       joinedRooms = new Map();
       lastUser = "";
+      currentUserRole = "";
       suppressCloseAlert = false;
+      adminPanelBtn.classList.add("hidden");
       roomList.innerHTML = "";
       chatWindow.innerHTML = '<div class="empty"></div>';
       closePanel();
@@ -1259,7 +1332,12 @@
         if (msg.msg_type === "edited") {
           const meta = document.createElement("div");
           meta.className = "msg-meta";
-          meta.textContent = "da sua";
+          meta.textContent = `da sua${msg.timestamp ? " - " + formatMessageTime(msg.timestamp) : ""}`;
+          msgEl.appendChild(meta);
+        } else if (msg.timestamp) {
+          const meta = document.createElement("div");
+          meta.className = "msg-meta";
+          meta.textContent = formatMessageTime(msg.timestamp);
           msgEl.appendChild(meta);
         }
         if (msg.username === username && canModifyMessage(msg)) {
@@ -1527,6 +1605,29 @@
       const units = ["B", "KB", "MB", "GB"];
       const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
       return `${(bytes / Math.pow(1024, index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+    }
+
+    function formatMessageTime(timestamp) {
+      const date = new Date(timestamp * 1000);
+      if (Number.isNaN(date.getTime())) return "";
+      const now = new Date();
+      const sameDay = date.getFullYear() === now.getFullYear()
+        && date.getMonth() === now.getMonth()
+        && date.getDate() === now.getDate();
+      const hhmm = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+      if (sameDay) return hhmm;
+      return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${hhmm}`;
+    }
+
+    function formatAdminDate(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    }
+
+    function pad2(value) {
+      return String(value).padStart(2, "0");
     }
 
     function detectMediaType(file) {
