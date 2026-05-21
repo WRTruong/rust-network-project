@@ -1,17 +1,378 @@
 use crate::chat::message::{ChatMessage, MediaInfo};
 use serde::Serialize;
 use std::env;
-use tiberius::{AuthMethod, Client, Config, EncryptionLevel, SqlBrowser};
+use tiberius::{AuthMethod, Client, Config, EncryptionLevel};
 use tokio::net::TcpStream;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 type DbError = Box<dyn std::error::Error + Send + Sync>;
 
+fn build_config(database: &str) -> Config {
+    let host = env::var("DB_HOST").unwrap_or_else(|_| "LAPTOP-E3ETC2TU".to_string());
+    let port = env::var("DB_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(1433);
+    let user = env::var("DB_USER").unwrap_or_else(|_| "sa".to_string());
+    let password = env::var("DB_PASSWORD").unwrap_or_else(|_| "123456".to_string());
+
+    let mut config = Config::new();
+    config.host(&host);
+    config.port(port);
+    config.database(database);
+    config.authentication(AuthMethod::sql_server(user, password));
+    config.encryption(EncryptionLevel::NotSupported);
+    config.trust_cert();
+    config
+}
+
+pub async fn init_db() -> Result<(), DbError> {
+    let host = env::var("DB_HOST").unwrap_or_else(|_| "LAPTOP-E3ETC2TU".to_string());
+    println!("Connecting to SQL Server at {}...", host);
+
+    // 1. Kết nối master → tạo database nếu chưa có
+    let master_config = build_config("master");
+    let tcp = TcpStream::connect(master_config.get_addr())
+        .await
+        .map_err(|e| format!("Cannot connect to SQL Server at {}: {}", host, e))?;
+    tcp.set_nodelay(true)?;
+    let mut master_client = Client::connect(master_config, tcp.compat_write()).await?;
+
+    println!("Creating database ChatDB if not exists...");
+    master_client
+        .execute("IF DB_ID(N'ChatDB') IS NULL CREATE DATABASE ChatDB;", &[])
+        .await?;
+    drop(master_client);
+
+    // 2. Kết nối trực tiếp ChatDB → tạo schema
+    println!("Setting up schema in ChatDB...");
+    let mut chatdb_client = get_db_client().await?;
+    init_schema(&mut chatdb_client).await?;
+
+    println!("Database initialized successfully!");
+    Ok(())
+}
+
+async fn init_schema(client: &mut Client<Compat<TcpStream>>) -> Result<(), DbError> {
+
+    // Create Roles table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.Roles', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.Roles (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_Roles PRIMARY KEY,
+                    name NVARCHAR(50) NOT NULL CONSTRAINT UQ_Roles_Name UNIQUE,
+                    description NVARCHAR(255) NULL,
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_Roles_CreatedAt DEFAULT SYSUTCDATETIME()
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create Permissions table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.Permissions', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.Permissions (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_Permissions PRIMARY KEY,
+                    name NVARCHAR(100) NOT NULL CONSTRAINT UQ_Permissions_Name UNIQUE,
+                    description NVARCHAR(255) NULL,
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_Permissions_CreatedAt DEFAULT SYSUTCDATETIME()
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create RolePermissions table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.RolePermissions', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.RolePermissions (
+                    role_id INT NOT NULL,
+                    permission_id INT NOT NULL,
+                    CONSTRAINT PK_RolePermissions PRIMARY KEY (role_id, permission_id),
+                    CONSTRAINT FK_RolePermissions_Roles FOREIGN KEY (role_id) REFERENCES dbo.Roles(id) ON DELETE CASCADE,
+                    CONSTRAINT FK_RolePermissions_Permissions FOREIGN KEY (permission_id) REFERENCES dbo.Permissions(id) ON DELETE CASCADE
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create Users table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.Users', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.Users (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_Users PRIMARY KEY,
+                    username NVARCHAR(50) NOT NULL,
+                    email NVARCHAR(100) NOT NULL,
+                    phone NVARCHAR(20) NOT NULL,
+                    password_hash NVARCHAR(255) NOT NULL,
+                    avatar_url NVARCHAR(MAX) NULL,
+                    role_id INT NOT NULL,
+                    is_active BIT NOT NULL CONSTRAINT DF_Users_IsActive DEFAULT 1,
+                    display_name NVARCHAR(100) NULL,
+                    bio NVARCHAR(500) NULL,
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_Users_CreatedAt DEFAULT SYSUTCDATETIME(),
+                    updated_at DATETIME2(0) NULL,
+                    last_login_at DATETIME2(0) NULL,
+                    CONSTRAINT UQ_Users_Username UNIQUE (username),
+                    CONSTRAINT UQ_Users_Email UNIQUE (email),
+                    CONSTRAINT UQ_Users_Phone UNIQUE (phone),
+                    CONSTRAINT FK_Users_Roles FOREIGN KEY (role_id) REFERENCES dbo.Roles(id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create FriendRequests table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.FriendRequests', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.FriendRequests (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_FriendRequests PRIMARY KEY,
+                    requester_id INT NOT NULL,
+                    addressee_id INT NOT NULL,
+                    status NVARCHAR(20) NOT NULL CONSTRAINT DF_FriendRequests_Status DEFAULT N'pending',
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_FriendRequests_CreatedAt DEFAULT SYSUTCDATETIME(),
+                    responded_at DATETIME2(0) NULL,
+                    CONSTRAINT FK_FriendRequests_Requester FOREIGN KEY (requester_id) REFERENCES dbo.Users(id),
+                    CONSTRAINT FK_FriendRequests_Addressee FOREIGN KEY (addressee_id) REFERENCES dbo.Users(id),
+                    CONSTRAINT CK_FriendRequests_NotSelf CHECK (requester_id <> addressee_id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create Friends table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.Friends', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.Friends (
+                    user_low_id INT NOT NULL,
+                    user_high_id INT NOT NULL,
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_Friends_CreatedAt DEFAULT SYSUTCDATETIME(),
+                    CONSTRAINT PK_Friends PRIMARY KEY (user_low_id, user_high_id),
+                    CONSTRAINT FK_Friends_Low FOREIGN KEY (user_low_id) REFERENCES dbo.Users(id),
+                    CONSTRAINT FK_Friends_High FOREIGN KEY (user_high_id) REFERENCES dbo.Users(id),
+                    CONSTRAINT CK_Friends_Order CHECK (user_low_id < user_high_id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create Groups table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.Groups', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.Groups (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_Groups PRIMARY KEY,
+                    name NVARCHAR(80) NOT NULL CONSTRAINT UQ_Groups_Name UNIQUE,
+                    owner_id INT NOT NULL,
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_Groups_CreatedAt DEFAULT SYSUTCDATETIME(),
+                    CONSTRAINT FK_Groups_Owner FOREIGN KEY (owner_id) REFERENCES dbo.Users(id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create GroupMembers table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.GroupMembers', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.GroupMembers (
+                    group_id INT NOT NULL,
+                    user_id INT NOT NULL,
+                    role NVARCHAR(20) NOT NULL CONSTRAINT DF_GroupMembers_Role DEFAULT N'member',
+                    joined_at DATETIME2(0) NOT NULL CONSTRAINT DF_GroupMembers_JoinedAt DEFAULT SYSUTCDATETIME(),
+                    CONSTRAINT PK_GroupMembers PRIMARY KEY (group_id, user_id),
+                    CONSTRAINT FK_GroupMembers_Groups FOREIGN KEY (group_id) REFERENCES dbo.Groups(id) ON DELETE CASCADE,
+                    CONSTRAINT FK_GroupMembers_Users FOREIGN KEY (user_id) REFERENCES dbo.Users(id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create GroupInvites table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.GroupInvites', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.GroupInvites (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_GroupInvites PRIMARY KEY,
+                    group_id INT NOT NULL,
+                    inviter_id INT NOT NULL,
+                    invitee_id INT NOT NULL,
+                    status NVARCHAR(20) NOT NULL CONSTRAINT DF_GroupInvites_Status DEFAULT N'pending',
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_GroupInvites_CreatedAt DEFAULT SYSUTCDATETIME(),
+                    responded_at DATETIME2(0) NULL,
+                    CONSTRAINT FK_GroupInvites_Groups FOREIGN KEY (group_id) REFERENCES dbo.Groups(id) ON DELETE CASCADE,
+                    CONSTRAINT FK_GroupInvites_Inviter FOREIGN KEY (inviter_id) REFERENCES dbo.Users(id),
+                    CONSTRAINT FK_GroupInvites_Invitee FOREIGN KEY (invitee_id) REFERENCES dbo.Users(id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create GroupJoinRequests table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.GroupJoinRequests', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.GroupJoinRequests (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_GroupJoinRequests PRIMARY KEY,
+                    group_id INT NOT NULL,
+                    requester_id INT NOT NULL,
+                    status NVARCHAR(20) NOT NULL CONSTRAINT DF_GroupJoinRequests_Status DEFAULT N'pending',
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_GroupJoinRequests_CreatedAt DEFAULT SYSUTCDATETIME(),
+                    responded_at DATETIME2(0) NULL,
+                    CONSTRAINT FK_GroupJoinRequests_Groups FOREIGN KEY (group_id) REFERENCES dbo.Groups(id) ON DELETE CASCADE,
+                    CONSTRAINT FK_GroupJoinRequests_Requester FOREIGN KEY (requester_id) REFERENCES dbo.Users(id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Create ChatHistory table
+    client
+        .execute(
+            "IF OBJECT_ID(N'dbo.ChatHistory', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.ChatHistory (
+                    id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_ChatHistory PRIMARY KEY,
+                    message_id NVARCHAR(128) NOT NULL,
+                    sender_id INT NULL,
+                    sender NVARCHAR(50) NULL,
+                    message NVARCHAR(MAX) NULL,
+                    room NVARCHAR(100) NOT NULL,
+                    msg_type NVARCHAR(20) NOT NULL CONSTRAINT DF_ChatHistory_MsgType DEFAULT N'message',
+                    created_at DATETIME2(0) NOT NULL CONSTRAINT DF_ChatHistory_CreatedAt DEFAULT SYSUTCDATETIME(),
+                    updated_at DATETIME2(0) NULL,
+                    is_deleted BIT NOT NULL CONSTRAINT DF_ChatHistory_IsDeleted DEFAULT 0,
+                    deleted_at DATETIME2(0) NULL,
+                    edited_at DATETIME2(0) NULL,
+                    media_type NVARCHAR(20) NULL,
+                    file_url NVARCHAR(MAX) NULL,
+                    file_name NVARCHAR(500) NULL,
+                    file_size BIGINT NULL,
+                    mime_type NVARCHAR(100) NULL,
+                    CONSTRAINT UQ_ChatHistory_MessageId UNIQUE (message_id),
+                    CONSTRAINT FK_ChatHistory_Users FOREIGN KEY (sender_id) REFERENCES dbo.Users(id)
+                );
+            END",
+            &[],
+        )
+        .await?;
+
+    // Seed Roles
+    client
+        .execute(
+            "MERGE dbo.Roles AS target
+            USING (VALUES
+                (N'admin', N'Administrator role'),
+                (N'user', N'Default chat user role')
+            ) AS source(name, description)
+            ON target.name = source.name
+            WHEN NOT MATCHED THEN
+                INSERT (name, description) VALUES (source.name, source.description);",
+            &[],
+        )
+        .await?;
+
+    // Seed Permissions
+    client
+        .execute(
+            "MERGE dbo.Permissions AS target
+            USING (VALUES
+                (N'chat.send', N'Send text messages'),
+                (N'chat.media', N'Send media messages'),
+                (N'message.edit.own', N'Edit own messages'),
+                (N'message.delete.own', N'Delete own messages'),
+                (N'admin.manage_users', N'Manage users and roles'),
+                (N'profile.update', N'Update own profile'),
+                (N'friend.manage', N'Manage own friends'),
+                (N'group.create', N'Create groups'),
+                (N'group.manage.own', N'Manage owned groups'),
+                (N'settings.update_password', N'Change own password')
+            ) AS source(name, description)
+            ON target.name = source.name
+            WHEN NOT MATCHED THEN
+                INSERT (name, description) VALUES (source.name, source.description);",
+            &[],
+        )
+        .await?;
+
+    // Assign admin permissions
+    client
+        .execute(
+            "INSERT INTO dbo.RolePermissions (role_id, permission_id)
+            SELECT r.id, p.id
+            FROM dbo.Roles r
+            CROSS JOIN dbo.Permissions p
+            WHERE r.name = N'admin'
+              AND NOT EXISTS (
+                  SELECT 1 FROM dbo.RolePermissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );",
+            &[],
+        )
+        .await?;
+
+    // Assign user permissions
+    client
+        .execute(
+            "INSERT INTO dbo.RolePermissions (role_id, permission_id)
+            SELECT r.id, p.id
+            FROM dbo.Roles r
+            JOIN dbo.Permissions p ON p.name IN (
+                N'chat.send',
+                N'chat.media',
+                N'message.edit.own',
+                N'message.delete.own',
+                N'profile.update',
+                N'friend.manage',
+                N'group.create',
+                N'group.manage.own',
+                N'settings.update_password'
+            )
+            WHERE r.name = N'user'
+              AND NOT EXISTS (
+                  SELECT 1 FROM dbo.RolePermissions rp
+                  WHERE rp.role_id = r.id AND rp.permission_id = p.id
+              );",
+            &[],
+        )
+        .await?;
+
+    Ok(())
+}
+
 #[derive(Serialize)]
 pub struct ProfileInfo {
     pub username: String,
+    pub email: String,
+    pub phone: String,
     pub display_name: String,
     pub bio: String,
+    pub avatar_url: Option<String>,
     pub role: String,
 }
 
@@ -20,6 +381,7 @@ pub struct UserSummary {
     pub username: String,
     pub display_name: String,
     pub bio: String,
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -66,39 +428,9 @@ pub struct GroupLists {
 }
 
 pub async fn get_db_client() -> Result<Client<Compat<TcpStream>>, DbError> {
-    let raw_host =
-        env::var("DB_HOST").unwrap_or_else(|_| r"DESKTOP-1IU3963\SQLEXPRESS".to_string());
-    let configured_port = env::var("DB_PORT")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok());
-    let database = env::var("DB_NAME").unwrap_or_else(|_| "ChatDB".to_string());
-    let user = env::var("DB_USER").unwrap_or_else(|_| "sa".to_string());
-    let password = env::var("DB_PASSWORD").unwrap_or_else(|_| "123456".to_string());
-    let (host, instance_name) = raw_host
-        .split_once('\\')
-        .map(|(host, instance)| (host.to_string(), Some(instance.to_string())))
-        .unwrap_or((raw_host, None));
-
-    let mut config = Config::new();
-    config.host(host);
-    if let (None, Some(instance_name)) = (configured_port, instance_name.as_deref()) {
-        config.port(1434);
-        config.instance_name(instance_name);
-    } else {
-        config.port(configured_port.unwrap_or(1433));
-    }
-    config.database(database);
-    config.authentication(AuthMethod::sql_server(user, password));
-    config.encryption(EncryptionLevel::NotSupported);
-    config.trust_cert();
-
-    let tcp = if configured_port.is_none() && instance_name.is_some() {
-        TcpStream::connect_named(&config).await?
-    } else {
-        TcpStream::connect(config.get_addr()).await?
-    };
+    let config = build_config("ChatDB");
+    let tcp = TcpStream::connect(config.get_addr()).await?;
     tcp.set_nodelay(true)?;
-
     Ok(Client::connect(config, tcp.compat_write()).await?)
 }
 
@@ -137,7 +469,7 @@ pub async fn get_profile(user_id: i32) -> Result<ProfileInfo, DbError> {
     let mut client = get_db_client().await?;
     let row = client
         .query(
-            "SELECT u.username, COALESCE(u.display_name, u.username), COALESCE(u.bio, N''), r.name
+            "SELECT u.username, u.email, u.phone, COALESCE(u.display_name, u.username), COALESCE(u.bio, N''), u.avatar_url, r.name
              FROM Users u
              JOIN Roles r ON r.id = u.role_id
              WHERE u.id = @P1",
@@ -148,11 +480,16 @@ pub async fn get_profile(user_id: i32) -> Result<ProfileInfo, DbError> {
         .await?
         .ok_or("profile not found")?;
 
+    let avatar: Option<&str> = row.get(5);
+    
     Ok(ProfileInfo {
         username: row.get::<&str, _>(0).unwrap_or("").to_string(),
-        display_name: row.get::<&str, _>(1).unwrap_or("").to_string(),
-        bio: row.get::<&str, _>(2).unwrap_or("").to_string(),
-        role: row.get::<&str, _>(3).unwrap_or("").to_string(),
+        email: row.get::<&str, _>(1).unwrap_or("").to_string(),
+        phone: row.get::<&str, _>(2).unwrap_or("").to_string(),
+        display_name: row.get::<&str, _>(3).unwrap_or("").to_string(),
+        bio: row.get::<&str, _>(4).unwrap_or("").to_string(),
+        avatar_url: avatar.map(|s| s.to_string()),
+        role: row.get::<&str, _>(6).unwrap_or("").to_string(),
     })
 }
 
@@ -160,14 +497,15 @@ pub async fn update_profile(
     user_id: i32,
     display_name: &str,
     bio: &str,
+    avatar_url: Option<&str>,
 ) -> Result<ProfileInfo, DbError> {
     let mut client = get_db_client().await?;
     client
         .execute(
             "UPDATE Users
-             SET display_name = @P1, bio = @P2, updated_at = SYSUTCDATETIME()
-             WHERE id = @P3",
-            &[&display_name, &bio, &user_id],
+             SET display_name = @P1, bio = @P2, avatar_url = COALESCE(@P3, avatar_url), updated_at = SYSUTCDATETIME()
+             WHERE id = @P4",
+            &[&display_name, &bio, &avatar_url, &user_id],
         )
         .await?;
 
@@ -239,9 +577,9 @@ pub async fn search_user(
     current_user_id: i32,
 ) -> Result<Option<UserSummary>, DbError> {
     let mut client = get_db_client().await?;
-    let row = client
+    let row: Option<tiberius::Row> = client
         .query(
-            "SELECT username, COALESCE(display_name, username), COALESCE(bio, N'')
+            "SELECT username, COALESCE(display_name, username), COALESCE(bio, N''), avatar_url
              FROM Users
              WHERE username = @P1 AND id <> @P2 AND is_active = 1",
             &[&username, &current_user_id],
@@ -250,10 +588,14 @@ pub async fn search_user(
         .into_row()
         .await?;
 
-    Ok(row.map(|row| UserSummary {
-        username: row.get::<&str, _>(0).unwrap_or("").to_string(),
-        display_name: row.get::<&str, _>(1).unwrap_or("").to_string(),
-        bio: row.get::<&str, _>(2).unwrap_or("").to_string(),
+    Ok(row.map(|row| {
+        let avatar: Option<&str> = row.get(3);
+        UserSummary {
+            username: row.get::<&str, _>(0).unwrap_or("").to_string(),
+            display_name: row.get::<&str, _>(1).unwrap_or("").to_string(),
+            bio: row.get::<&str, _>(2).unwrap_or("").to_string(),
+            avatar_url: avatar.map(|s| s.to_string()),
+        }
     }))
 }
 
@@ -348,7 +690,7 @@ pub async fn friend_lists(user_id: i32) -> Result<FriendLists, DbError> {
     let mut client = get_db_client().await?;
     let rows = client
         .query(
-            "SELECT u.username, COALESCE(u.display_name, u.username), COALESCE(u.bio, N'')
+            "SELECT u.username, COALESCE(u.display_name, u.username), COALESCE(u.bio, N''), u.avatar_url
              FROM Friends f
              JOIN Users u ON u.id = CASE WHEN f.user_low_id = @P1 THEN f.user_high_id ELSE f.user_low_id END
              WHERE f.user_low_id = @P1 OR f.user_high_id = @P1
@@ -362,7 +704,7 @@ pub async fn friend_lists(user_id: i32) -> Result<FriendLists, DbError> {
 
     let incoming_rows = client
         .query(
-            "SELECT u.username, COALESCE(u.display_name, u.username), COALESCE(u.bio, N'')
+            "SELECT u.username, COALESCE(u.display_name, u.username), COALESCE(u.bio, N''), u.avatar_url
              FROM FriendRequests fr
              JOIN Users u ON u.id = fr.requester_id
              WHERE fr.addressee_id = @P1 AND fr.status = N'pending'
@@ -379,7 +721,7 @@ pub async fn friend_lists(user_id: i32) -> Result<FriendLists, DbError> {
 
     let outgoing_rows = client
         .query(
-            "SELECT u.username, COALESCE(u.display_name, u.username), COALESCE(u.bio, N'')
+            "SELECT u.username, COALESCE(u.display_name, u.username), COALESCE(u.bio, N''), u.avatar_url
              FROM FriendRequests fr
              JOIN Users u ON u.id = fr.addressee_id
              WHERE fr.requester_id = @P1 AND fr.status = N'pending'
@@ -406,15 +748,17 @@ pub async fn get_room_history(room: &str) -> Result<Vec<ChatMessage>, DbError> {
     let stream = client
         .query(
             "SELECT message_id, sender, message, room, msg_type, is_deleted,
-                    media_type, file_url, file_name, file_size, mime_type, created_timestamp
+                    media_type, file_url, file_name, file_size, mime_type, created_timestamp, avatar_url
              FROM (
-                 SELECT TOP 50 message_id, sender, message, room, msg_type, is_deleted,
-                               media_type, file_url, file_name, file_size, mime_type,
-                               DATEDIFF_BIG(SECOND, '1970-01-01', created_at) AS created_timestamp,
-                               created_at
-                 FROM ChatHistory
-                 WHERE room = @P1
-                 ORDER BY created_at DESC
+                 SELECT TOP 50 ch.message_id, ch.sender, ch.message, ch.room, ch.msg_type, ch.is_deleted,
+                               ch.media_type, ch.file_url, ch.file_name, ch.file_size, ch.mime_type,
+                               DATEDIFF_BIG(SECOND, '1970-01-01', ch.created_at) AS created_timestamp,
+                               u.avatar_url,
+                               ch.created_at
+                 FROM ChatHistory ch
+                 LEFT JOIN Users u ON ch.sender_id = u.id
+                 WHERE ch.room = @P1
+                 ORDER BY ch.created_at DESC
              ) AS recent
              ORDER BY created_at ASC",
             &[&room],
@@ -628,10 +972,18 @@ pub async fn get_private_history(username: &str) -> Result<Vec<ChatMessage>, DbE
     let stream = client
         .query(
             "SELECT message_id, sender, message, room, msg_type, is_deleted,
-                    media_type, file_url, file_name, file_size, mime_type,
-                    DATEDIFF_BIG(SECOND, '1970-01-01', created_at)
-             FROM ChatHistory
-             WHERE (room LIKE 'dm:' + @P1 + ':%' OR room LIKE 'dm:%:' + @P2)
+                    media_type, file_url, file_name, file_size, mime_type, created_timestamp, avatar_url
+             FROM (
+                 SELECT TOP 50 ch.message_id, ch.sender, ch.message, ch.room, ch.msg_type, ch.is_deleted,
+                               ch.media_type, ch.file_url, ch.file_name, ch.file_size, ch.mime_type,
+                               DATEDIFF_BIG(SECOND, '1970-01-01', ch.created_at) AS created_timestamp,
+                               u.avatar_url,
+                               ch.created_at
+                 FROM ChatHistory ch
+                  LEFT JOIN Users u ON ch.sender_id = u.id
+                 WHERE (ch.room LIKE 'dm:' + @P1 + ':%' OR ch.room LIKE 'dm:%:' + @P2)
+                 ORDER BY ch.created_at DESC
+             ) AS recent
              ORDER BY created_at ASC",
             &[&username, &username],
         )
@@ -640,11 +992,14 @@ pub async fn get_private_history(username: &str) -> Result<Vec<ChatMessage>, DbE
     rows_to_messages(stream.into_first_result().await?)
 }
 
+
 pub async fn delete_message(
     message_id: &str,
     username: &str,
 ) -> Result<Option<ChatMessage>, DbError> {
-    let existing = get_message_by_id(message_id).await?;
+    let mut client = get_db_client().await?;
+
+    let existing = get_message_by_id_with(&mut client, message_id).await?;
     let Some(existing) = existing else {
         return Ok(None);
     };
@@ -653,7 +1008,6 @@ pub async fn delete_message(
         return Ok(None);
     }
 
-    let mut client = get_db_client().await?;
     client
         .execute(
             "UPDATE ChatHistory
@@ -672,7 +1026,7 @@ pub async fn delete_message(
         )
         .await?;
 
-    get_message_by_id(message_id).await
+    get_message_by_id_with(&mut client, message_id).await
 }
 
 pub async fn edit_message(
@@ -680,7 +1034,9 @@ pub async fn edit_message(
     username: &str,
     new_content: &str,
 ) -> Result<Option<ChatMessage>, DbError> {
-    let existing = get_message_by_id(message_id).await?;
+    let mut client = get_db_client().await?;
+
+    let existing = get_message_by_id_with(&mut client, message_id).await?;
     let Some(existing) = existing else {
         return Ok(None);
     };
@@ -689,7 +1045,6 @@ pub async fn edit_message(
         return Ok(None);
     }
 
-    let mut client = get_db_client().await?;
     client
         .execute(
             "UPDATE ChatHistory
@@ -707,22 +1062,25 @@ pub async fn edit_message(
         )
         .await?;
 
-    get_message_by_id(message_id).await
+    get_message_by_id_with(&mut client, message_id).await
 }
 
-async fn get_message_by_id(message_id: &str) -> Result<Option<ChatMessage>, DbError> {
-    let mut client = get_db_client().await?;
+// Tái sử dụng connection đã mở — dùng nội bộ để tránh mở connection thêm
+async fn get_message_by_id_with(
+    client: &mut Client<Compat<TcpStream>>,
+    message_id: &str,
+) -> Result<Option<ChatMessage>, DbError> {
     let stream = client
         .query(
-            "SELECT message_id, sender, message, room, msg_type, is_deleted,
-                    media_type, file_url, file_name, file_size, mime_type,
-                    DATEDIFF_BIG(SECOND, '1970-01-01', created_at)
-             FROM ChatHistory
-             WHERE message_id = @P1",
+            "SELECT ch.message_id, ch.sender, ch.message, ch.room, ch.msg_type, ch.is_deleted,
+                    ch.media_type, ch.file_url, ch.file_name, ch.file_size, ch.mime_type,
+                    DATEDIFF_BIG(SECOND, '1970-01-01', ch.created_at), u.avatar_url
+             FROM ChatHistory ch
+             LEFT JOIN Users u ON ch.sender_id = u.id
+             WHERE ch.message_id = @P1",
             &[&message_id],
         )
         .await?;
-
     let messages = rows_to_messages(stream.into_first_result().await?)?;
     Ok(messages.into_iter().next())
 }
@@ -819,10 +1177,12 @@ async fn add_group_member(
 }
 
 fn user_summary_from_row(row: tiberius::Row) -> UserSummary {
+    let avatar: Option<&str> = row.get(3);
     UserSummary {
         username: row.get::<&str, _>(0).unwrap_or("").to_string(),
         display_name: row.get::<&str, _>(1).unwrap_or("").to_string(),
         bio: row.get::<&str, _>(2).unwrap_or("").to_string(),
+        avatar_url: avatar.map(|s| s.to_string()),
     }
 }
 
@@ -883,6 +1243,7 @@ fn rows_to_messages(rows: Vec<tiberius::Row>) -> Result<Vec<ChatMessage>, DbErro
             .get::<i64, _>(11)
             .map(|value| value.max(0) as u64)
             .unwrap_or_default();
+        let sender_avatar: Option<&str> = row.get(12);
 
         let mut chat_msg = ChatMessage {
             msg_type: if is_deleted {
@@ -895,6 +1256,7 @@ fn rows_to_messages(rows: Vec<tiberius::Row>) -> Result<Vec<ChatMessage>, DbErro
             room: room.to_string(),
             message_id: message_id.to_string(),
             timestamp,
+            sender_avatar: sender_avatar.map(|s| s.to_string()),
             ..Default::default()
         };
 

@@ -5,6 +5,13 @@ mod db;
 mod auth;
 #[tokio::main]
 async fn main() {
+    // Graceful Ctrl+C: exit with code 0 so Windows doesn't report 0xc000013a
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            std::process::exit(0);
+        }
+    });
+
     let mode = std::env::args().nth(1);
 
     match mode.as_deref() {

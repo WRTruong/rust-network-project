@@ -288,6 +288,10 @@
       border-radius: 12px;
       background: #f0f0f0;
       max-width: 65%;
+      border-radius: 6px;
+      padding: 2px 4px;
+      background: rgba(0, 132, 255, 0.08);
+      transition: background 0.15s ease, opacity 0.15s ease;
       font-size: 14px;
       line-height: 1.4;
       color: var(--text);
@@ -295,13 +299,37 @@
     }
 
     .msg.deleted {
-      color: #888;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px dashed rgba(255, 255, 255, 0.35);
+      color: rgba(255, 255, 255, 0.8);
       font-style: italic;
+      padding: 8px 12px;
+      border-radius: 12px;
+      max-width: 65%;
+      opacity: 0.95;
+    }
+
+    body:not(.theme-dark) .msg.deleted {
+      background: #5b7ce2;
+      border: 1px solid #3d61c8;
+      color: #0f172a;
     }
 
     .msg-group.own .msg.deleted {
+      background: rgba(255, 255, 255, 0.16);
+      border-color: rgba(255, 255, 255, 0.4);
       color: rgba(255, 255, 255, 0.8);
     }
+
+    /* Link trong tin nhắn */
+    .msg a {
+      color: inherit;
+      text-decoration: underline;
+      opacity: 0.85;
+      word-break: break-all;
+    }
+    .msg a:hover { opacity: 1; }
+    .msg-group.own .msg a { color: rgba(255, 255, 255, 0.95); }
 
     .msg-media {
       margin-top: 6px;
@@ -348,9 +376,10 @@
 
     .msg-actions {
       display: flex;
-      gap: 4px;
+      gap: 6px;
       opacity: 0;
-      transition: opacity 0.15s;
+      transition: opacity 0.15s ease;
+      align-items: center;
     }
 
     .msg-group:hover .msg-actions {
@@ -358,19 +387,51 @@
     }
 
     .msg-action {
-      width: 28px;
-      height: 28px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: white;
-      color: var(--text);
+      padding: 4px 10px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #555;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
+      font-weight: 600;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    /* Ensure contrast for light theme: buttons and sidebar names should remain visible */
+    body:not(.theme-dark) .msg-action {
+      background: #fff;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    body:not(.theme-dark) .msg-group:not(.own) .msg {
+      background: #f7fbff; /* subtle tint so actions and text contrast */
+    }
+
+    /* Force room names to be clearly visible on any background */
+    .room-item .room-name {
+      color: var(--text) !important;
+    }
+
+    /* Make msg-actions more discoverable on hover in light theme */
+    .msg-group:hover .msg-actions { opacity: 1; }
+
+    .msg-action:hover {
+      background: var(--primary);
+      color: white;
+      border-color: transparent;
     }
 
     .msg-group.own .msg {
       background: var(--primary);
       color: white;
+    }
+
+    .msg-group.own .msg-action {
+      background: rgba(255, 255, 255, 0.16);
+      color: white;
+      border-color: rgba(255, 255, 255, 0.3);
     }
 
     .msg-group.system .msg {
@@ -602,14 +663,69 @@
       color: var(--text);
     }
 
+    /* Selection styles to avoid unreadable blue-on-blue highlights */
+    ::selection { background: rgba(0,132,255,0.12); color: inherit; }
+    body.theme-dark ::selection { background: rgba(255,255,255,0.08); color: inherit; }
+
+    /* Ensure action buttons contrast in both themes */
+    .msg-action { background: rgba(255,255,255,0.92); color: var(--text); border: 1px solid var(--border); }
+    body.theme-dark .msg-action { background: rgba(255,255,255,0.06); color: var(--text); border-color: rgba(255,255,255,0.06); }
+    .msg-group.own .msg-action { background: rgba(255,255,255,0.12); color: white; }
+
+    /* Chat composer/input color in dark theme: make typed text darkest gray for strong contrast */
+    body.theme-dark .composer input,
+    body.theme-dark .composer textarea,
+    body.theme-dark .message-input,
+    body.theme-dark #message-input,
+    body.theme-dark .panel input[type="text"],
+    body.theme-dark .panel textarea,
+    body.theme-dark .chat-input {
+      color: #111827; 
+      background: #ffffff; 
+      border-color: rgba(255,255,255,0.08);
+      caret-color: #111827;
+    }
+    body.theme-dark .composer input::placeholder,
+    body.theme-dark .composer textarea::placeholder,
+    body.theme-dark .panel input::placeholder,
+    body.theme-dark .panel textarea::placeholder,
+    body.theme-dark #message-input::placeholder {
+      color: #64748b; /* muted placeholder */
+    }
+
+    h white */
+    body:not(.theme-dark) .msg-deleted,
+    body:not(.theme-dark) .message-deleted,
+    body:not(.theme-dark) .msg .deleted {
+      color: #0b1220; 
+      background: #181818; 
+      border: 1px solid #0989d9;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+
+    /* Action buttons in light theme: use dark text and clear borders */
+    body:not(.theme-dark) .msg-action {
+      background: #ffffff;
+      color: #0b1220; /* stronger dark text */
+      border: 1px solid #e5e7eb;
+    }
+    body:not(.theme-dark) .msg-action:hover { background: #f1f5f9; }
+    body:not(.theme-dark) .msg-action, body:not(.theme-dark) .msg-action * { color: #0b1220 !important; }
+
+    /* Room active contrast */
+    .room-item.active { background: #e7f3ff; }
+    body.theme-dark .room-item.active { background: #0b2540; }
+
     @media (max-width: 760px) {
       .media-panel {
         grid-template-columns: 1fr;
       }
 
       .msg {
-        max-width: 82%;
-      }
+        color: var(--primary);
+        text-decoration: none;
     }
 
     ::-webkit-scrollbar {
@@ -628,6 +744,7 @@
     ::-webkit-scrollbar-thumb:hover {
       background: #999;
     }
+  }
   </style>
 </head>
 <body>
@@ -636,31 +753,37 @@
     <h1 id="auth-title">Rust Chat App</h1>
     <p id="auth-desc">Vui lòng đăng nhập hệ thống</p>
     
-    <input id="username-input" type="text" placeholder="Tên đăng nhập..." maxlength="50">
-    <input id="password-input" type="password" placeholder="Mật khẩu..." maxlength="50">
+    <!-- Login mode inputs -->
+    <div id="login-form">
+      <input id="username-input" type="text" placeholder="Tên đăng nhập, email hoặc số điện thoại..." maxlength="100">
+      <input id="password-input" type="password" placeholder="Mật khẩu..." maxlength="50">
+    </div>
+    
+    <!-- Register mode inputs -->
+    <div id="register-form" style="display: none;">
+      <input id="reg-username" type="text" placeholder="Tên đăng nhập..." maxlength="50">
+      <input id="reg-email" type="email" placeholder="Email..." maxlength="100">
+      <input id="reg-phone" type="tel" placeholder="Số điện thoại..." maxlength="20">
+      <input id="reg-password" type="password" placeholder="Mật khẩu..." maxlength="50">
+      <input id="reg-password-confirm" type="password" placeholder="Xác nhận mật khẩu..." maxlength="50">
+    </div>
     
     <div id="auth-buttons" style="display: flex; flex-direction: column; gap: 10px;">
         <button id="btn-primary" onclick="handleAuth(isLoginMode ? 'login' : 'register')">Đăng nhập</button>
-        <button id="btn-secondary" onclick="handleAuth('register')" 
-                style="background: #28a745; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer;">
-            Tạo tài khoản mới
-        </button>
     </div>
     
-    <div id="auth-toggle" style="margin-top: 15px; font-size: 13px;">
+    <div id="auth-toggle" style="margin-top: 15px; font-size: 13px; text-align: center;">
         <a href="#" onclick="toggleAuthMode()" id="toggle-link" style="color: var(--primary); text-decoration: none;">
             Chưa có tài khoản? Đăng ký ngay
         </a>
     </div>
+    
+    <div id="auth-error" style="margin-top: 10px; padding: 10px; background: #ffe5e5; color: #cc0000; border-radius: 6px; font-size: 12px; display: none;"></div>
 </div>
 
     <div class="sidebar hidden" id="sidebar">
       <div class="sidebar-header">
         <h2>Chats</h2>
-        <div style="display: flex; gap: 6px;">
-          <button class="btn-new" onclick="createRoomChat()" style="flex: 1;">Phòng</button>
-          <button class="btn-new" onclick="createPrivateChat()" style="flex: 1;">Riêng</button>
-        </div>
       </div>
       <div class="side-actions">
         <button onclick="openPanel('profile')">Profile</button>
@@ -675,7 +798,7 @@
 
     <div class="chat hidden" id="chat-screen">
       <div class="chat-header">
-        <h3 id="room-title"># general</h3>
+        <h3 id="room-title">Select a room</h3>
         <button class="btn-leave" onclick="handleLeave()">Rời phòng</button>
       </div>
       <div id="chat-window">
@@ -716,6 +839,9 @@
     let isLoginMode = true;
     let activePanel = "";
     let currentUserRole = "";
+    let currentUserAvatar = "";
+    let currentUserDisplayName = "";
+    let userGroups = new Map();
 
     const chatWindow = document.getElementById("chat-window");
     const roomTitle = document.getElementById("room-title");
@@ -766,33 +892,75 @@
         const title = document.getElementById("auth-title");
         const desc = document.getElementById("auth-desc");
         const btnPrimary = document.getElementById("btn-primary");
-        const btnSecondary = document.getElementById("btn-secondary");
         const toggleLink = document.getElementById("toggle-link");
+        const loginForm = document.getElementById("login-form");
+        const registerForm = document.getElementById("register-form");
+        const authError = document.getElementById("auth-error");
 
+        authError.style.display = "none";
+        
         if (isLoginMode) {
             title.innerText = "Rust Chat App";
             desc.innerText = "Vui lòng đăng nhập hệ thống";
             btnPrimary.innerText = "Đăng nhập";
-            btnPrimary.style.display = "block";
-            btnSecondary.style.display = "block";
-            btnSecondary.innerText = "Tạo tài khoản mới";
             toggleLink.innerText = "Chưa có tài khoản? Đăng ký ngay";
+            loginForm.style.display = "block";
+            registerForm.style.display = "none";
         } else {
             title.innerText = "Đăng ký tài khoản";
             desc.innerText = "Tham gia cộng đồng Rust";
             btnPrimary.innerText = "Xác nhận Đăng ký";
-            btnSecondary.style.display = "none";
             toggleLink.innerText = "Đã có tài khoản? Đăng nhập";
+            loginForm.style.display = "none";
+            registerForm.style.display = "block";
         }
     }
 
     async function handleAuth(mode) {
-        username = document.getElementById("username-input").value.trim();
-        const password = document.getElementById("password-input").value.trim();
-
-        if (!username || !password) {
-            alert("Vui lòng nhập đầy đủ thông tin");
-            return;
+        const authError = document.getElementById("auth-error");
+        authError.style.display = "none";
+        
+        let user, pass, email, phone;
+        
+        if (mode === "login") {
+            user = document.getElementById("username-input").value.trim();
+            pass = document.getElementById("password-input").value.trim();
+            
+            if (!user || !pass) {
+                authError.textContent = "Vui lòng nhập đầy đủ thông tin đăng nhập";
+                authError.style.display = "block";
+                return;
+            }
+        } else {
+            user = document.getElementById("reg-username").value.trim();
+            email = document.getElementById("reg-email").value.trim();
+            phone = document.getElementById("reg-phone").value.trim();
+            pass = document.getElementById("reg-password").value.trim();
+            const passConfirm = document.getElementById("reg-password-confirm").value.trim();
+            
+            if (!user || !email || !phone || !pass) {
+                authError.textContent = "Vui lòng nhập đầy đủ thông tin";
+                authError.style.display = "block";
+                return;
+            }
+            
+            if (pass !== passConfirm) {
+                authError.textContent = "Mật khẩu không trùng khớp";
+                authError.style.display = "block";
+                return;
+            }
+            
+            if (!email.includes("@") || !email.includes(".")) {
+                authError.textContent = "Email không hợp lệ";
+                authError.style.display = "block";
+                return;
+            }
+            
+            if (!/^\d{10,20}$/.test(phone.replace(/\+/g, ""))) {
+                authError.textContent = "Số điện thoại không hợp lệ (10-20 chữ số)";
+                authError.style.display = "block";
+                return;
+            }
         }
 
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -800,7 +968,8 @@
                 await connectWebSocket();
             } catch (error) {
                 console.error(error);
-                alert("Không thể kết nối tới server WebSocket. Vui lòng kiểm tra server đang chạy.");
+                authError.textContent = "Không thể kết nối tới server. Vui lòng kiểm tra server đang chạy.";
+                authError.style.display = "block";
                 return;
             }
 
@@ -811,7 +980,22 @@
             };
         }
 
-        sendAuthRequest(mode, username, password);
+        sendAuthRequest(mode, user, pass, email, phone);
+    }
+    
+    function sendAuthRequest(mode, user, pass, email, phone) {
+        const authData = {
+            msg_type: mode, 
+            username: user,
+            password: pass,
+            email: email || "",
+            phone: phone || "",
+            content: mode === "register" ? "Đăng ký mới" : "Đăng nhập",
+            room: "general",
+            target: "",
+            users: []
+        };
+        ws.send(JSON.stringify(authData));
     }
 
     function createWebSocket(url) {
@@ -853,20 +1037,6 @@
       throw lastError || new Error("Không thể kết nối WebSocket");
     }
 
-    function sendAuthRequest(mode, user, pass) {
-        // mode sẽ là 'login' hoặc 'register'
-        const authData = {
-            msg_type: mode, 
-            username: user,
-            password: pass,
-            content: mode === "register" ? "Yêu cầu đăng ký mới" : "Yêu cầu đăng nhập",
-            room: "general",
-            target: "",
-            users: []
-        };
-        ws.send(JSON.stringify(authData));
-    }
-
     function sendAction(msg_type, { content = "", target = "", room = "general" } = {}) {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         alert("Mat ket noi toi server");
@@ -877,6 +1047,16 @@
 
     function requestDashboardData() {
       sendAction("profile_get");
+      // Khôi phục các group từ localStorage
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('group_')) {
+          const groupData = JSON.parse(localStorage.getItem(key));
+          if (groupData && groupData.id) {
+            joinRoom(groupData.id);
+          }
+        }
+      }
     }
 
     function handleControlMessage(data) {
@@ -884,12 +1064,42 @@
       if (!controlTypes.has(data.msg_type)) return false;
       const payload = data.content ? JSON.parse(data.content) : null;
       if (data.msg_type === "profile_data") {
+        // Cập nhật username thực tế từ server
+        if (payload && payload.username && username !== payload.username) {
+          username = payload.username;
+        }
+        
+        // Lưu avatar cũ để so sánh
+        const oldAvatar = currentUserAvatar;
+        
+        // Cập nhật thông tin profile người dùng hiện tại
+        if (payload && payload.avatar_url) {
+          currentUserAvatar = payload.avatar_url;
+        }
+        if (payload && payload.display_name) {
+          currentUserDisplayName = payload.display_name;
+        }
+        
+        // Nếu avatar thay đổi, re-render lại tất cả messages
+        if (oldAvatar !== currentUserAvatar) {
+          refreshMessagesWithAvatar();
+        }
+        
         updateAdminVisibility(payload);
         if (activePanel === "profile") renderProfilePanel(payload);
       }
       if (data.msg_type === "friend_search_result") renderFriendSearchResult(payload);
       if (data.msg_type === "friends_data") renderFriendsPanel(payload);
-      if (data.msg_type === "groups_data") renderGroupsPanel(payload);
+      if (data.msg_type === "groups_data") {
+        // Lưu danh sách groups
+        if (payload && Array.isArray(payload)) {
+          userGroups.clear();
+          payload.forEach(g => {
+            if (g.group_id) userGroups.set(g.group_id, g.group_name);
+          });
+        }
+        renderGroupsPanel(payload);
+      }
       if (data.msg_type === "admin_users_data") renderAdminPanel(payload);
       return true;
     }
@@ -925,25 +1135,96 @@
       panelBody.innerHTML = "";
     }
 
+    function refreshMessagesWithAvatar() {
+      // Re-render all messages when user avatar changes
+      if (currentRoom && joinedRooms.has(currentRoom)) {
+        const roomData = joinedRooms.get(currentRoom);
+        if (roomData && roomData.msgs) {
+          chatWindow.innerHTML = "";
+          lastUser = "";
+          roomData.msgs.forEach(msg => renderMessage(msg));
+        }
+      }
+    }
+
     function renderProfilePanel(profile) {
       if (activePanel && activePanel !== "profile") return;
       activePanel = "profile";
       utilityPanel.classList.remove("hidden");
       panelTitle.textContent = "Profile";
       updateAdminVisibility(profile);
+      
+      const avatarImg = profile.avatar_url ? `<img src="${escapeAttr(profile.avatar_url)}" style="width:60px; height:60px; border-radius:50%; object-fit:cover;">` : `<div style="width:60px; height:60px; background:#0084ff; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:24px; font-weight:bold;">${escapeHtml(profile.username[0].toUpperCase())}</div>`;
+      
       panelBody.innerHTML = `
         <div class="panel-section">
-          <h4>${escapeHtml(profile.username)} (${escapeHtml(profile.role)})</h4>
-          <input id="profile-display" value="${escapeAttr(profile.display_name || profile.username)}" maxlength="100" placeholder="Ten hien thi">
-          <textarea id="profile-bio" maxlength="500" placeholder="Gioi thieu ngan">${escapeHtml(profile.bio || "")}</textarea>
-          <button onclick="saveProfile()">Save profile</button>
+          <h4 style="text-align:center; margin-bottom:10px;">Avatar</h4>
+          <div style="text-align:center; margin-bottom:10px;">
+            ${avatarImg}
+          </div>
+          <input id="avatar-file" type="file" accept="image/*" onchange="uploadAvatar()" style="width:100%;">
+          <small style="color:#999;">Kích thước tối đa: 5MB. Định dạng: JPG, PNG, GIF</small>
+        </div>
+        
+        <div class="panel-section">
+          <h4>Thông tin cá nhân</h4>
+          <label style="font-size:12px; color:#666;">Tên đăng nhập</label>
+          <input type="text" value="${escapeAttr(profile.username)}" disabled style="opacity:0.6;">
+          
+          <label style="font-size:12px; color:#666; margin-top:8px;">Email</label>
+          <input type="email" value="${escapeAttr(profile.email || "")}" disabled style="opacity:0.6;">
+          
+          <label style="font-size:12px; color:#666; margin-top:8px;">Số điện thoại</label>
+          <input type="tel" value="${escapeAttr(profile.phone || "")}" disabled style="opacity:0.6;">
+          
+          <label style="font-size:12px; color:#666; margin-top:8px;">Tên hiển thị</label>
+          <input id="profile-display" value="${escapeAttr(profile.display_name || profile.username)}" maxlength="100" placeholder="Tên hiển thị">
+          
+          <label style="font-size:12px; color:#666; margin-top:8px;">Giới thiệu</label>
+          <textarea id="profile-bio" maxlength="500" placeholder="Giới thiệu ngắn">${escapeHtml(profile.bio || "")}</textarea>
+          
+          <button onclick="saveProfile()" style="width:100%; margin-top:8px;">Lưu thay đổi</button>
         </div>`;
+    }
+    
+    function uploadAvatar() {
+      const fileInput = document.getElementById("avatar-file");
+      const file = fileInput.files[0];
+      
+      if (!file) return;
+      
+      if (file.size > 5 * 1024 * 1024) {
+        alert("Kích thước file quá lớn (tối đa 5MB)");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const base64 = e.target.result;
+        const displayName = document.getElementById("profile-display").value.trim();
+        const bio = document.getElementById("profile-bio").value.trim();
+        sendAction("profile_update", { 
+          content: JSON.stringify({ 
+            display_name: displayName, 
+            bio: bio,
+            avatar_url: base64
+          }) 
+        });
+        alert("Avatar đã được cập nhật!");
+      };
+      reader.readAsDataURL(file);
     }
 
     function saveProfile() {
       const displayName = document.getElementById("profile-display").value.trim();
       const bio = document.getElementById("profile-bio").value.trim();
-      sendAction("profile_update", { content: JSON.stringify({ display_name: displayName, bio }) });
+      sendAction("profile_update", { 
+        content: JSON.stringify({ 
+          display_name: displayName, 
+          bio: bio
+        }) 
+      });
+      alert("Thông tin cá nhân đã được cập nhật!");
     }
 
     function updateAdminVisibility(profile) {
@@ -1020,7 +1301,13 @@
       const target = prompt("Username to invite:");
       if (target) sendAction("group_invite", { room: `group:${group}`, target: target.trim() });
     }
-    function acceptGroupInvite(group) { sendAction("group_invite_accept", { target: group }); }
+    function acceptGroupInvite(group) { 
+      sendAction("group_invite_accept", { target: group });
+      // Sau khi accept, tự động join group
+      setTimeout(() => {
+        joinRoom(`group:${group}`);
+      }, 500);
+    }
     function respondGroupJoin(group, target, accept) {
       sendAction(accept ? "group_join_accept" : "group_join_decline", { room: `group:${group}`, target });
     }
@@ -1129,6 +1416,27 @@
     function escapeAttr(value) { return escapeHtml(value).replace(/`/g, "&#096;"); }
     function escapeJs(value) { return String(value ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'"); }
 
+    // Phát hiện URL và wrap thành thẻ <a> có thể click
+    const _URL_RE = /https?:\/\/[^\s<>"']+[^\s<>"'.,:;!?)\]]/g;
+    function linkifyContent(text) {
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      for (const m of text.matchAll(_URL_RE)) {
+        if (m.index > last)
+          frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const a = document.createElement("a");
+        a.href = m[0];
+        a.textContent = m[0];
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        frag.appendChild(a);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length)
+        frag.appendChild(document.createTextNode(text.slice(last)));
+      return frag;
+    }
+
     function handleServerMessage(e) {
         const data = JSON.parse(e.data);
 
@@ -1141,17 +1449,22 @@
             return;
         }
 
-        if (data.msg_type === "system" && data.content.toLowerCase().includes("thành công")) {
+        if (data.msg_type === "system" && data.content.toLowerCase().includes("đăng nhập thành công")) {
+          // Remove blocking alert on successful login — switch to non-blocking UI update
+          loginScreen.classList.add("hidden");
+          sidebar.classList.remove("hidden");
+          chatScreen.classList.remove("hidden");
+          requestDashboardData();
+          sendAction("profile_get");
+          return;
+        }
+
+        if (data.msg_type === "system" && data.content.toLowerCase().includes("đăng ký thành công")) {
             alert(data.content);
             if (!isLoginMode) {
                 toggleAuthMode();
-            } else {
-                loginScreen.classList.add("hidden");
-                sidebar.classList.remove("hidden");
-                chatScreen.classList.remove("hidden");
-                joinRoom("general");
-                requestDashboardData();
             }
+            return;
         }
 
         if (!joinedRooms.has(data.room)) {
@@ -1172,10 +1485,14 @@
 
     function resetApp() {
       ws = null;
+      username = "";
       currentRoom = null;
       joinedRooms = new Map();
       lastUser = "";
       currentUserRole = "";
+      currentUserAvatar = "";
+      currentUserDisplayName = "";
+      userGroups.clear();
       suppressCloseAlert = false;
       adminPanelBtn.classList.add("hidden");
       roomList.innerHTML = "";
@@ -1184,6 +1501,24 @@
       loginScreen.classList.remove("hidden");
       sidebar.classList.add("hidden");
       chatScreen.classList.add("hidden");
+      document.getElementById("auth-error").style.display = "none";
+      
+      // Reset to login mode
+      isLoginMode = true;
+      const loginForm = document.getElementById("login-form");
+      const regForm = document.getElementById("register-form");
+      if (loginForm && regForm) {
+        loginForm.style.display = "block";
+        regForm.style.display = "none";
+      }
+      const title = document.getElementById("auth-title");
+      if (title) title.innerText = "Rust Chat App";
+      const desc = document.getElementById("auth-desc");
+      if (desc) desc.innerText = "Vui lòng đăng nhập hệ thống";
+      const btnPrimary = document.getElementById("btn-primary");
+      if (btnPrimary) btnPrimary.innerText = "Đăng nhập";
+      const toggleLink = document.getElementById("toggle-link");
+      if (toggleLink) toggleLink.innerText = "Chưa có tài khoản? Đăng ký ngay";
     }
 
 
@@ -1194,6 +1529,14 @@
       }
 
       joinedRooms.set(room, { msgs: [] });
+      // Lưu group vào localStorage nếu là group (bắt đầu với 'group:')
+      if (room.startsWith('group:')) {
+        const groupData = {
+          id: room,
+          timestamp: Date.now()
+        };
+        localStorage.setItem(`group_${room}`, JSON.stringify(groupData));
+      }
       ws.send(JSON.stringify({
         msg_type: "join",
         username: username,
@@ -1210,6 +1553,12 @@
       currentRoom = room;
       lastUser = "";
       cancelEdit();
+      if (!room) {
+        roomTitle.textContent = "Select a room";
+        renderSidebar();
+        renderMessages();
+        return;
+      }
       roomTitle.textContent = isPrivateRoom(room)
         ? displayRoomName(room)
         : (displayRoomName(room).startsWith("#") ? displayRoomName(room) : `# ${displayRoomName(room)}`);
@@ -1244,6 +1593,10 @@
         }
 
         if (!content) return;
+        if (!currentRoom) {
+            alert("Vui lòng chọn phòng trước khi gửi tin nhắn.");
+            return;
+        }
         const target = isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "";
 
         const msg = {
@@ -1261,8 +1614,8 @@
     }
 
     function handleLeave() {
-      if (!currentRoom || currentRoom === "general") {
-        alert("Không thể rời khỏi phòng chung");
+      if (!currentRoom) {
+        alert("Không có phòng nào để rời");
         return;
       }
 
@@ -1277,7 +1630,11 @@
       }));
 
       joinedRooms.delete(currentRoom);
-      switchRoom("general");
+      currentRoom = null;
+      roomTitle.textContent = "Select a room";
+      lastUser = "";
+      renderSidebar();
+      renderMessages();
     }
 
     function renderSidebar() {
@@ -1317,8 +1674,15 @@
         if (isNewUser && msg.username !== username) {
           const header = document.createElement("div");
           header.className = "msg-user-header";
+          // Sử dụng avatar từ profile nếu có, không thì dùng chữ cái đầu tiên
+          let avatarContent = msg.username[0].toUpperCase();
+          let avatarClass = "";
+          if (msg.username === username && currentUserAvatar) {
+            avatarContent = `<img src="${currentUserAvatar}" alt="${msg.username}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+            avatarClass = " avatar-img";
+          }
           header.innerHTML = `
-            <div class="msg-avatar">${msg.username[0].toUpperCase()}</div>
+            <div class="msg-avatar${avatarClass}">${avatarContent}</div>
             <div class="msg-username">${msg.username}</div>
           `;
           chatWindow.appendChild(header);
@@ -1344,8 +1708,8 @@
           const actions = document.createElement("div");
           actions.className = "msg-actions";
           actions.innerHTML = `
-            <button class="msg-action" title="Sua" onclick="startEdit('${msg.message_id}')">Edit</button>
-            <button class="msg-action" title="Xoa" onclick="deleteMessage('${msg.message_id}')">Del</button>
+            <button class="msg-action" title="Sửa" onclick="startEdit('${msg.message_id}')">Sửa</button>
+            <button class="msg-action" title="Xóa" onclick="deleteMessage('${msg.message_id}')">Xóa</button>
           `;
           div.appendChild(actions);
         }
@@ -1459,6 +1823,11 @@
     }
 
     function upsertRoomMessage(room, msg) {
+      // Ensure room exists in joinedRooms
+      if (!joinedRooms.has(room)) {
+        joinedRooms.set(room, { msgs: [] });
+      }
+      
       const data = joinedRooms.get(room);
       const id = msg.message_id;
       if (!id) {
@@ -1479,7 +1848,8 @@
     function buildMessageContent(msg) {
       const wrapper = document.createElement("div");
       const text = document.createElement("div");
-      text.textContent = msg.content || mediaFallbackText(msg);
+      const rawText = msg.content || mediaFallbackText(msg);
+      text.appendChild(linkifyContent(rawText));
       wrapper.appendChild(text);
 
       if (msg.media && msg.msg_type !== "deleted") {
@@ -1611,11 +1981,17 @@
       const date = new Date(timestamp * 1000);
       if (Number.isNaN(date.getTime())) return "";
       const now = new Date();
-      const sameDay = date.getFullYear() === now.getFullYear()
-        && date.getMonth() === now.getMonth()
-        && date.getDate() === now.getDate();
       const hhmm = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-      if (sameDay) return hhmm;
+      const todayStart    = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const yesterdayStart = new Date(todayStart - 86400000);
+      const weekStart     = new Date(todayStart - 6 * 86400000);
+      const dateStart     = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      if (dateStart.getTime() === todayStart.getTime()) return hhmm;
+      if (dateStart.getTime() === yesterdayStart.getTime()) return `Hôm qua ${hhmm}`;
+      if (dateStart >= weekStart) {
+        const days = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+        return `${days[date.getDay()]} ${hhmm}`;
+      }
       return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()} ${hhmm}`;
     }
 
