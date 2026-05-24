@@ -20,6 +20,8 @@ use tokio::sync::{Mutex, mpsc};
 struct ProfilePayload {
     display_name: String,
     bio: String,
+    #[serde(default)]
+    avatar_url: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -85,7 +87,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     continue;
                 }
 
-                let Some(session) = user_session.as_ref() else {
+                let Some(session) = user_session.as_mut() else {
                     continue;
                 };
 
@@ -180,12 +182,27 @@ async fn ensure_registered(
 
         match msg.msg_type.as_str() {
             "register" => {
+                // Kiểm tra email/phone hợp lệ
+                let email = msg.email.trim();
+                let phone = msg.phone.trim();
+                
+                if !auth::validate_email(email) {
+                    send_local_error(client_tx, "Email không hợp lệ");
+                    return false;
+                }
+                
+                if !auth::validate_phone(phone) {
+                    send_local_error(client_tx, "Số điện thoại không hợp lệ");
+                    return false;
+                }
+
+                // Kiểm tra tên đăng nhập đã tồn tại
                 let mut user_exists = false;
                 {
                     let check_query = db_client
                         .query(
-                            "SELECT username FROM Users WHERE username = @P1",
-                            &[&requested_username],
+                            "SELECT username FROM Users WHERE username = @P1 OR email = @P2 OR phone = @P3",
+                            &[&requested_username, &email, &phone],
                         )
                         .await;
 
@@ -204,11 +221,11 @@ async fn ensure_registered(
                 }
 
                 if user_exists {
-                    send_local_error(client_tx, "Tên đăng nhập đã tồn tại");
+                    send_local_error(client_tx, "Tên đăng nhập, email hoặc số điện thoại đã tồn tại");
                     return false;
                 }
 
-                if auth::register(&mut db_client, requested_username, &msg.password).await {
+                if auth::register(&mut db_client, requested_username, email, phone, &msg.password).await {
                     let success_msg = ChatMessage {
                         msg_type: "system".to_string(),
                         username: "System".to_string(),
@@ -230,16 +247,16 @@ async fn ensure_registered(
                 {
                     let mut clients = state.clients.lock().await;
 
-                    if clients.contains_key(requested_username) {
+                    if clients.contains_key(&session.username) {
                         send_local_error(client_tx, "Tài khoản này đang đăng nhập ở nơi khác");
                         return false;
                     }
 
-                    clients.insert(requested_username.to_string(), client_tx.clone());
+                    clients.insert(session.username.clone(), client_tx.clone());
                     *current_username = session.username.clone();
                     drop(clients);
 
-                    send_all_private_chat_history(state, client_tx, requested_username).await;
+                    send_all_private_chat_history(state, client_tx, &session.username).await;
 
                     // Gửi tin nhắn chào mừng
                     let welcome = ChatMessage {
@@ -247,7 +264,7 @@ async fn ensure_registered(
                         username: "System".to_string(),
                         content: format!(
                             "Đăng nhập thành công! Chào mừng {} ({})",
-                            requested_username, session.role
+                            session.username, session.role
                         ),
                         room: "general".to_string(),
                         ..Default::default()
@@ -257,7 +274,7 @@ async fn ensure_registered(
 
                     return true;
                 } else {
-                    send_local_error(client_tx, "Sai tên đăng nhập hoặc mật khẩu");
+                    send_local_error(client_tx, "Sai tên đăng nhập/email/số điện thoại hoặc mật khẩu");
                     return false;
                 }
             }
@@ -268,7 +285,15 @@ async fn ensure_registered(
         }
     }
 
-    // 2. Nếu đã có session, kiểm tra khớp username
+    // 2. Nếu đã có session hợp lệ, không cần kiểm tra username
+    // Session chứa thông tin xác thực đã được chứng minh
+    // Username trong message có thể là email/phone hoặc bất kỳ giá trị nào
+    if current_session.is_some() {
+        // Đã xác thực, có thể thực hiện hành động
+        return true;
+    }
+    
+    // Nếu chưa có session, phải có username match
     if current_username != requested_username {
         send_local_error(client_tx, "Phiên làm việc không hợp lệ (Session mismatch)");
         return false;
@@ -337,6 +362,7 @@ async fn handle_message(
         String::new()
     };
     chat_msg.password = String::new();
+    chat_msg.sender_avatar = session.avatar_url.clone();
 
     // --- LƯU VÀO SQL SERVER (Async Task) ---
     if let Err(e) = db::save_chat_message(&chat_msg, session.user_id).await {
@@ -476,6 +502,7 @@ async fn handle_media(
     };
     chat_msg.password = String::new();
     chat_msg.media = msg.media.clone();
+    chat_msg.sender_avatar = session.avatar_url.clone();
 
     // --- LƯU VÀO SQL SERVER (Async Task) ---
     if let Err(e) = db::save_chat_message(&chat_msg, session.user_id).await {
@@ -577,7 +604,7 @@ async fn handle_profile_get(client_tx: &mpsc::UnboundedSender<ChatMessage>, sess
 
 async fn handle_profile_update(
     client_tx: &mpsc::UnboundedSender<ChatMessage>,
-    session: &UserSession,
+    session: &mut UserSession,
     msg: &ChatMessage,
 ) {
     if !session.has_permission("profile.update") {
@@ -588,8 +615,17 @@ async fn handle_profile_update(
         send_local_error(client_tx, "Invalid profile data");
         return;
     };
-    match db::update_profile(session.user_id, &payload.display_name, &payload.bio).await {
-        Ok(profile) => send_json(client_tx, "profile_data", &profile),
+    match db::update_profile(
+        session.user_id, 
+        &payload.display_name, 
+        &payload.bio,
+        payload.avatar_url.as_deref()
+    ).await {
+        Ok(profile) => {
+            send_json(client_tx, "profile_data", &profile);
+            session.display_name = Some(profile.display_name);
+            session.avatar_url = profile.avatar_url;
+        }
         Err(e) => {
             eprintln!("Profile Update Error: {:?}", e);
             send_local_error(client_tx, "Could not update profile");

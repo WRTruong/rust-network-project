@@ -6,6 +6,10 @@ pub struct ChatMessage {
     pub msg_type: String,
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub phone: String,
     pub content: String,
     pub room: String,
     #[serde(default)]
@@ -18,6 +22,8 @@ pub struct ChatMessage {
     pub timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<MediaInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_avatar: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +46,8 @@ impl ChatMessage {
             msg_type: msg_type.to_string(),
             username: username.to_string(),
             password: String::new(),
+            email: String::new(),
+            phone: String::new(),
             content: content.to_string(),
             room: room.to_string(),
             target: String::new(),
@@ -47,6 +55,7 @@ impl ChatMessage {
             message_id: format!("{}-{}", username, now.as_nanos()),
             timestamp: now.as_secs(),
             media: None,
+            sender_avatar: None,
         }
     }
 

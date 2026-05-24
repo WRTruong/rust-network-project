@@ -7,8 +7,15 @@ use tokio::sync::Mutex;
 
 use crate::chat::message_store::MessageStore;
 use crate::server::websocket::{AppState, ws_handler};
+use crate::db;
 
 pub async fn start_server() {
+    // Initialize database
+    if let Err(e) = db::init_db().await {
+        eprintln!("Failed to initialize database: {}", e);
+        return;
+    }
+
     let state: AppState = AppState {
         clients: Arc::new(Mutex::new(HashMap::new())),
         rooms: Arc::new(Mutex::new(HashMap::new())),
