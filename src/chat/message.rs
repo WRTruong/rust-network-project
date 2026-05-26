@@ -22,7 +22,7 @@ pub struct ChatMessage {
     pub timestamp: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<MediaInfo>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "avatar_url")]
     pub sender_avatar: Option<String>,
 }
 

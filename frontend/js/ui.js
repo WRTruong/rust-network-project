@@ -234,9 +234,9 @@ function renderMessage(msg) {
       avatarDiv.className = "msg-avatar";
       avatarDiv.dataset.avatarUser = msg.username; // for sync
 
-      const cachedAv = window._avatarCache && window._avatarCache[msg.username];
+      const cachedAv = window._avatarCache?.[msg.username];
       if (cachedAv) {
-        avatarDiv.innerHTML = `<img src="${cachedAv}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="${escapeHtml(msg.username)}">`;
+        avatarDiv.innerHTML = `<img src="${cachedAv}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="${escapeHtml(msg.username)}" onerror="this.parentElement.textContent='${escapeHtml((msg.username||'?')[0].toUpperCase())}';">`;
       } else {
         avatarDiv.textContent = (msg.username || "?")[0].toUpperCase();
       }

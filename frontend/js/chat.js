@@ -31,18 +31,19 @@ function roomAvatar(room) {
 // ── Room join / switch / leave ─────────────
 function joinRoom(room) {
   if (joinedRooms.has(room)) {
-    // Re-apply persistent lock state in case it was reset
-    const savedLock = loadRoomLockState(room);
+    // Re-apply persistent lock state cho user hiện tại
+    const savedLock = loadRoomLockState(room, typeof username !== "undefined" ? username : "");
     const existing  = joinedRooms.get(room);
     if (savedLock.passwordHash && !existing.passwordHash) {
       existing.locked       = savedLock.locked;
       existing.passwordHash = savedLock.passwordHash;
       joinedRooms.set(room, existing);
     }
-    switchRoom(room);
+    _attemptSwitchRoom(room);
     return;
   }
-  const savedLock = loadRoomLockState(room);
+  // Load lock state theo username hiện tại (mỗi user có lock riêng)
+  const savedLock = loadRoomLockState(room, typeof username !== "undefined" ? username : "");
   joinedRooms.set(room, { msgs: [], locked: savedLock.locked, passwordHash: savedLock.passwordHash });
 
   if (room.startsWith("group:")) {
@@ -53,6 +54,17 @@ function joinRoom(room) {
     msg_type: "join",
     username, password: "", room, content: "", target: "", users: []
   }));
+  _attemptSwitchRoom(room);
+}
+
+function _attemptSwitchRoom(room) {
+  const roomData = joinedRooms.get(room);
+  if (roomData && roomData.locked) {
+    // If the room is locked, don't just switch. Show unlock modal.
+    currentRoom = room; // Temporary set to allow modal to unlock it
+    showLockModal("unlock");
+    return;
+  }
   switchRoom(room);
 }
 
@@ -106,28 +118,68 @@ async function createPrivateChat() {
 }
 
 // ── Lock ──────────────────────────────────
-function normalizeLockKey(room) {
-  // Key cố định theo room — không dùng username để tránh mất lock khi username
-  // chưa được set lúc joinRoom chạy đầu tiên
-  return `chat_lock_${String(room || "").trim().toLowerCase()}`;
+function normalizeLockKey(room, forUser) {
+  // Key PHẢI có username để mỗi user có lock state riêng
+  // forUser: username cụ thể (dùng khi lưu/đọc) — nếu không có thì dùng global username
+  const user = forUser || (typeof username !== "undefined" ? username : "");
+  const roomNorm = String(room || "").trim().toLowerCase();
+  if (user) return `chat_lock_u:${user}:${roomNorm}`;
+  // Fallback khi username chưa set — key tạm thời, sẽ được migrate sau
+  return `chat_lock_${roomNorm}`;
 }
 
-function loadRoomLockState(room) {
+function _lockKeyPrefix(forUser) {
+  const user = forUser || (typeof username !== "undefined" ? username : "");
+  return user ? `chat_lock_u:${user}:` : `chat_lock_`;
+}
+
+function loadRoomLockState(room, forUser) {
   try {
-    const raw = localStorage.getItem(normalizeLockKey(room));
-    if (!raw) return { locked: false, passwordHash: "" };
-    const parsed = JSON.parse(raw);
-    return {
-      locked:       !!parsed.locked,
-      passwordHash: typeof parsed.passwordHash === "string" ? parsed.passwordHash : ""
-    };
+    // Thử key mới (có username) trước
+    const newKey = normalizeLockKey(room, forUser);
+    const raw    = localStorage.getItem(newKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        locked:       !!parsed.locked,
+        passwordHash: typeof parsed.passwordHash === "string" ? parsed.passwordHash : ""
+      };
+    }
+    // Migration: thử key cũ (không có username)
+    const oldKey = `chat_lock_${String(room || "").trim().toLowerCase()}`;
+    const oldRaw = localStorage.getItem(oldKey);
+    if (oldRaw) {
+      const parsed = JSON.parse(oldRaw);
+      const state  = {
+        locked:       !!parsed.locked,
+        passwordHash: typeof parsed.passwordHash === "string" ? parsed.passwordHash : ""
+      };
+      // Migrate sang key mới và xóa key cũ
+      if (state.passwordHash && forUser) {
+        localStorage.setItem(newKey, JSON.stringify(state));
+        localStorage.removeItem(oldKey);
+      }
+      return state;
+    }
+    return { locked: false, passwordHash: "" };
   } catch { return { locked: false, passwordHash: "" }; }
 }
 
 function saveRoomLockState(room, state) {
-  const key = normalizeLockKey(room);
-  if (!state.passwordHash && !state.locked) { localStorage.removeItem(key); return; }
-  localStorage.setItem(key, JSON.stringify({ locked: state.locked, passwordHash: state.passwordHash }));
+  // Lưu theo user hiện tại — KHÔNG ảnh hưởng user khác
+  const key    = normalizeLockKey(room);
+  // Xóa key cũ (migration cleanup)
+  const oldKey = `chat_lock_${String(room || "").trim().toLowerCase()}`;
+  if (key !== oldKey) localStorage.removeItem(oldKey);
+
+  if (!state.passwordHash && !state.locked) {
+    localStorage.removeItem(key);
+    return;
+  }
+  localStorage.setItem(key, JSON.stringify({
+    locked:       !!state.locked,
+    passwordHash: state.passwordHash
+  }));
 }
 
 function getRoomLockData(room) {
@@ -313,7 +365,11 @@ function sendMessage() {
   if (!canRoomBeSent()) { showToast("Chat đang bị khóa. Vui lòng mở khóa trước.", "warning"); return; }
 
   const target = isPrivateRoom(currentRoom) ? getPrivateTarget(currentRoom) : "";
-  ws.send(JSON.stringify({ msg_type: "message", username, password: "", content, room: currentRoom, target, users: [] }));
+  ws.send(JSON.stringify({
+    msg_type: "message", username, password: "", content,
+    room: currentRoom, target, users: [],
+    avatar_url: typeof currentUserAvatar !== "undefined" ? currentUserAvatar : ""
+  }));
   input.value = "";
 }
 
@@ -352,7 +408,10 @@ function canModifyMessage(msg) {
 }
 
 function upsertRoomMessage(room, msg) {
-  if (!joinedRooms.has(room)) joinedRooms.set(room, { msgs: [] });
+  if (!joinedRooms.has(room)) {
+    const savedLock = loadRoomLockState(room, typeof username !== "undefined" ? username : "");
+    joinedRooms.set(room, { msgs: [], locked: savedLock.locked, passwordHash: savedLock.passwordHash });
+  }
   const data = joinedRooms.get(room);
   const id   = msg.message_id;
   if (!id) { data.msgs.push(msg); return false; }

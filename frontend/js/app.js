@@ -122,6 +122,21 @@ function backRegStep1() {
   if (errEl) errEl.style.display = "none";
 }
 
+function _showFieldError(inputId, message) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.classList.add("field-error");
+  input.focus();
+  setTimeout(() => input.classList.remove("field-error"), 820);
+  
+  const authError = document.getElementById("auth-error");
+  const errTxt = document.getElementById("auth-error-text");
+  if (authError && errTxt) {
+    errTxt.textContent = message;
+    authError.style.display = "flex";
+  }
+}
+
 // Password show/hide toggle
 function togglePwd(inputId, btn) {
   const inp = document.getElementById(inputId);
@@ -165,16 +180,22 @@ function checkPasswordStrength(pwd) {
 async function handleAuth(mode) {
   const authError = document.getElementById("auth-error");
   authError.style.display = "none";
+  
+  // Remove all previous error classes
+  document.querySelectorAll(".field-error").forEach(el => el.classList.remove("field-error"));
 
   let user, pass, email, phone;
 
   if (mode === "login") {
     user = document.getElementById("username-input").value.trim();
     pass = document.getElementById("password-input").value.trim();
-    if (!user || !pass) {
-      const errTxt1 = document.getElementById("auth-error-text");
-      if (errTxt1) errTxt1.textContent = "Vui lòng nhập đầy đủ thông tin đăng nhập";
-      authError.style.display = "flex";
+    
+    if (!user) {
+      _showFieldError("username-input", "Tên đăng nhập không được để trống");
+      return;
+    }
+    if (!pass) {
+      _showFieldError("password-input", "Mật khẩu không được để trống");
       return;
     }
     username = user;
@@ -185,28 +206,28 @@ async function handleAuth(mode) {
     pass  = document.getElementById("reg-password").value.trim();
     const passConfirm = document.getElementById("reg-password-confirm").value.trim();
 
-    if (!user || !email || !phone || !pass) {
-      const errTxt2 = document.getElementById("auth-error-text");
-      if (errTxt2) errTxt2.textContent = "Vui lòng nhập đầy đủ thông tin";
-      authError.style.display = "flex";
+    if (!pass) {
+      _showFieldError("reg-password", "Vui lòng nhập mật khẩu");
+      return;
+    }
+    if (!passConfirm) {
+      _showFieldError("reg-password-confirm", "Vui lòng xác nhận mật khẩu");
       return;
     }
     if (pass !== passConfirm) {
-      const errTxt3 = document.getElementById("auth-error-text");
-      if (errTxt3) errTxt3.textContent = "Mật khẩu không trùng khớp";
-      authError.style.display = "flex";
+      _showFieldError("reg-password-confirm", "Mật khẩu không trùng khớp");
       return;
     }
-    if (!email.includes("@") || !email.includes(".")) {
-      const errTxt4 = document.getElementById("auth-error-text");
-      if (errTxt4) errTxt4.textContent = "Email không hợp lệ";
-      authError.style.display = "flex";
+    if (!email || !email.includes("@") || !email.includes(".")) {
+      _showFieldError("reg-email", "Email không hợp lệ");
       return;
     }
-    if (!/^\d{10,20}$/.test(phone.replace(/\+/g, ""))) {
-      const errTxt5 = document.getElementById("auth-error-text");
-      if (errTxt5) errTxt5.textContent = "Số điện thoại không hợp lệ (10-20 chữ số)";
-      authError.style.display = "flex";
+    if (!phone || !/^\d{10,20}$/.test(phone.replace(/\+/g, ""))) {
+      _showFieldError("reg-phone", "Số điện thoại không hợp lệ (10-20 chữ số)");
+      return;
+    }
+    if (!user) {
+      _showFieldError("reg-username", "Tên đăng nhập không được để trống");
       return;
     }
   }
@@ -286,6 +307,20 @@ function handleServerMessage(e) {
 
   if (handleControlMessage(data)) return;
 
+  // ── Realtime avatar broadcast từ server ──
+  // Server emit khi bất kỳ user nào đổi avatar
+  if (data.msg_type === "avatar_updated" || data.msg_type === "user_avatar_updated" || data.msg_type === "profile_broadcast") {
+    const who = data.username || data.content?.username;
+    const url  = data.avatar_url || data.content?.avatar_url || (typeof data.content === "string" ? tryParseJson(data.content)?.avatar_url : null);
+    if (who && url) {
+      window._avatarCache = window._avatarCache || {};
+      window._avatarCache[who] = url;
+      if (typeof syncAvatarsForUser === "function") syncAvatarsForUser(who, url);
+      if (typeof renderSidebar === "function") renderSidebar();
+    }
+    return;
+  }
+
   if (data.msg_type === "error") {
     showToast(data.content || "Lỗi từ server", "error");
     return;
@@ -306,6 +341,18 @@ function handleServerMessage(e) {
   }
 
   if (!joinedRooms.has(data.room)) joinedRooms.set(data.room, { msgs: [] });
+
+  // Nếu message có kèm avatar_url của sender — cache lại ngay
+  if (data.username && data.avatar_url) {
+    window._avatarCache = window._avatarCache || {};
+    const cached = window._avatarCache[data.username];
+    if (!cached || cached !== data.avatar_url) {
+      window._avatarCache[data.username] = data.avatar_url;
+      if (typeof syncAvatarsForUser === "function") {
+        syncAvatarsForUser(data.username, data.avatar_url);
+      }
+    }
+  }
 
   const isUpdate = upsertRoomMessage(data.room, data);
   renderSidebar();
@@ -484,11 +531,25 @@ function requestDashboardData() {
     }
   }
   // Restore lock states — delay để đảm bảo profile_get đã xử lý xong
-  setTimeout(restoreAllLockStates, 400);
+  // Gọi sau khi username đã được set từ profile_get response (~400ms)
+  setTimeout(() => {
+    if (username) {
+      restoreAllLockStates();
+    } else {
+      // Thử lại nếu username chưa có
+      setTimeout(restoreAllLockStates, 800);
+    }
+  }, 400);
 }
 
 function restoreAllLockStates() {
-  const prefix = "chat_lock_";
+  // Chỉ restore lock state của USER HIỆN TẠI
+  // Key format mới: "chat_lock_u:USERNAME:room"
+  if (!username) return; // chưa có username → không restore
+
+  const prefix = `chat_lock_u:${username}:`;
+  let restored = 0;
+
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     if (!key || !key.startsWith(prefix)) continue;
@@ -497,17 +558,44 @@ function restoreAllLockStates() {
       const saved = JSON.parse(localStorage.getItem(key));
       if (!saved || !saved.passwordHash) continue;
       if (joinedRooms.has(room)) {
-        const data = joinedRooms.get(room);
-        // Always apply saved lock state (even if data already has it)
+        const data    = joinedRooms.get(room);
         data.locked       = !!saved.locked;
         data.passwordHash = saved.passwordHash;
         joinedRooms.set(room, data);
-      } else {
-        // Room not in joinedRooms yet (e.g. DM not joined) — pre-register lock
-        // Will be applied when joinRoom is called later
+        restored++;
       }
     } catch(e) {}
   }
-  if (typeof renderSidebar === "function") renderSidebar();
-  if (typeof updateLockActions === "function") updateLockActions();
+
+  // Migration: đọc key cũ (chat_lock_room) nếu có và chưa có key mới
+  const oldPrefix = "chat_lock_";
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(oldPrefix) || key.startsWith("chat_lock_u:")) continue;
+    try {
+      const room    = key.slice(oldPrefix.length);
+      const newKey  = `chat_lock_u:${username}:${room}`;
+      if (localStorage.getItem(newKey)) continue; // đã có key mới, bỏ qua
+      const saved   = JSON.parse(localStorage.getItem(key));
+      if (!saved || !saved.passwordHash) continue;
+      // Migrate sang key mới
+      localStorage.setItem(newKey, JSON.stringify(saved));
+      localStorage.removeItem(key);
+      if (joinedRooms.has(room)) {
+        const data    = joinedRooms.get(room);
+        data.locked       = !!saved.locked;
+        data.passwordHash = saved.passwordHash;
+        joinedRooms.set(room, data);
+        restored++;
+      }
+    } catch(e) {}
+  }
+
+  if (restored > 0) {
+    if (typeof renderSidebar === "function") renderSidebar();
+    if (typeof updateLockActions === "function") updateLockActions();
+  }
+}
+function tryParseJson(str) {
+  try { return JSON.parse(str); } catch { return null; }
 }
