@@ -112,7 +112,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         handle_leave(&state, &username, &mut joined_rooms, &msg.room).await;
                     }
                     "profile_get" => handle_profile_get(&client_tx, session).await,
-                    "profile_update" => handle_profile_update(&client_tx, session, &msg).await,
+                    "profile_update" => handle_profile_update(&state, &client_tx, session, &msg).await,
+                    "avatar_broadcast" | "avatar_updated" | "user_avatar_updated" => {
+                        handle_avatar_broadcast(&state, session, &msg).await;
+                    }
                     "friend_search" => handle_friend_search(&client_tx, session, &msg).await,
                     "friend_request" => handle_friend_request(&client_tx, session, &msg).await,
                     "friend_accept" => handle_friend_respond(&client_tx, session, &msg, true).await,
@@ -603,6 +606,7 @@ async fn handle_profile_get(client_tx: &mpsc::UnboundedSender<ChatMessage>, sess
 }
 
 async fn handle_profile_update(
+    state: &AppState,
     client_tx: &mpsc::UnboundedSender<ChatMessage>,
     session: &mut UserSession,
     msg: &ChatMessage,
@@ -615,6 +619,7 @@ async fn handle_profile_update(
         send_local_error(client_tx, "Invalid profile data");
         return;
     };
+    let avatar_changed = payload.avatar_url.is_some() && payload.avatar_url != session.avatar_url;
     match db::update_profile(
         session.user_id, 
         &payload.display_name, 
@@ -623,13 +628,35 @@ async fn handle_profile_update(
     ).await {
         Ok(profile) => {
             send_json(client_tx, "profile_data", &profile);
-            session.display_name = Some(profile.display_name);
-            session.avatar_url = profile.avatar_url;
+            session.display_name = Some(profile.display_name.clone());
+            session.avatar_url = profile.avatar_url.clone();
+            
+            if avatar_changed {
+                let mut broadcast_msg = ChatMessage::new("avatar_updated", &session.username, "", "general");
+                broadcast_msg.sender_avatar = session.avatar_url.clone();
+                let clients = state.clients.lock().await;
+                for tx in clients.values() {
+                    let _ = tx.send(broadcast_msg.clone());
+                }
+            }
         }
         Err(e) => {
             eprintln!("Profile Update Error: {:?}", e);
             send_local_error(client_tx, "Could not update profile");
         }
+    }
+}
+
+async fn handle_avatar_broadcast(
+    state: &AppState,
+    session: &UserSession,
+    msg: &ChatMessage,
+) {
+    let clients = state.clients.lock().await;
+    let mut broadcast_msg = msg.clone();
+    broadcast_msg.username = session.username.clone();
+    for tx in clients.values() {
+        let _ = tx.send(broadcast_msg.clone());
     }
 }
 

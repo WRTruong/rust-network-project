@@ -248,6 +248,7 @@ function sendPendingMedia() {
         users:      [],
         message_id: "",
         timestamp:  0,
+        avatar_url: typeof currentUserAvatar !== "undefined" ? currentUserAvatar : "",
         media: {
           media_type: mediaType,
           file_url:   reader.result,   // base64 data URL
