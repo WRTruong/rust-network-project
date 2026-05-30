@@ -5,6 +5,13 @@ mod db;
 mod auth;
 #[tokio::main]
 async fn main() {
+    // Load environment variables from .env file
+    dotenvy::dotenv().ok();
+
+    let db_host = std::env::var("DB_HOST").unwrap_or_else(|_| "(not set)".to_string());
+    let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "1433".to_string());
+    println!("DB config: host={} port={}", db_host, db_port);
+
     // Graceful Ctrl+C: exit with code 0 so Windows doesn't report 0xc000013a
     tokio::spawn(async {
         if tokio::signal::ctrl_c().await.is_ok() {

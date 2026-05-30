@@ -362,6 +362,30 @@ async fn init_schema(client: &mut Client<Compat<TcpStream>>) -> Result<(), DbErr
         )
         .await?;
 
+    // Seed default Admin User if not exists
+    let admin_exists = client
+        .query("SELECT 1 FROM dbo.Users WHERE username = N'admin'", &[])
+        .await?
+        .into_first_result()
+        .await?
+        .len() > 0;
+
+    if !admin_exists {
+        println!("Seeding default admin user (admin/admin123)...");
+        let password_hash = bcrypt::hash("admin123", bcrypt::DEFAULT_COST)
+            .map_err(|e| format!("Failed to hash admin password: {}", e))?;
+        
+        client
+            .execute(
+                "INSERT INTO dbo.Users (username, email, phone, password_hash, display_name, role_id, is_active)
+                 SELECT N'admin', N'admin@example.com', N'0123456789', @P1, N'Administrator', id, 1
+                 FROM dbo.Roles
+                 WHERE name = N'admin'",
+                &[&password_hash],
+            )
+            .await?;
+    }
+
     Ok(())
 }
 
