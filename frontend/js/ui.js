@@ -192,16 +192,26 @@ function renderSidebar() {
     const isActive   = room === currentRoom ? "active" : "";
     const timeStr    = lastMsg && lastMsg.timestamp ? formatMessageTime(lastMsg.timestamp) : "";
     const initial    = roomAvatar(room);
+    
+    // Trạng thái chưa đọc (unread)
+    const unreadDot  = data.unread ? `<span class="room-unread-dot" title="Có tin nhắn mới"></span>` : "";
+    const unreadClass= data.unread ? "unread" : "";
+
     return `
-      <div class="room-item ${isActive}" onclick="switchRoom('${room}')">
+      <div class="room-item ${isActive} ${unreadClass}" onclick="switchRoom('${room}')">
         <div class="room-avatar">${initial}</div>
         <div class="room-info">
           <div class="room-name">${lockIcon}${escapeHtml(displayRoomName(room))}</div>
           <div class="room-msg">${escapeHtml(preview)}</div>
         </div>
-        ${timeStr ? `<div class="room-time">${timeStr}</div>` : ""}
+        <div class="room-meta-right" style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0;">
+          ${timeStr ? `<div class="room-time">${timeStr}</div>` : ""}
+          ${unreadDot}
+        </div>
       </div>`;
   }).join("");
+
+  updateChatNavBadge();
 }
 
 // ── Messages ──────────────────────────────
@@ -363,12 +373,16 @@ function handleControlMessage(data) {
     if (activePanel === "profile") renderProfilePanel(payload);
   }
   if (data.msg_type === "friend_search_result") renderFriendSearchResult(payload);
-  if (data.msg_type === "friends_data")         renderFriendsPanel(payload);
+  if (data.msg_type === "friends_data") {
+    updateFriendsNavBadge(payload);
+    renderFriendsPanel(payload);
+  }
   if (data.msg_type === "groups_data") {
     if (payload && Array.isArray(payload)) {
       userGroups.clear();
       payload.forEach(g => { if (g.group_id) userGroups.set(g.group_id, g.group_name); });
     }
+    updateGroupsNavBadge(payload);
     renderGroupsPanel(payload);
   }
   if (data.msg_type === "admin_users_data") renderAdminPanel(payload);
@@ -637,4 +651,63 @@ function renderUserRows(users, actionRenderer) {
       <div><div class="list-title">${escapeHtml(u.display_name || u.username)}</div><div class="list-note">@${escapeHtml(u.username)}</div></div>
       <div style="display:flex;gap:6px;">${actionRenderer(u)}</div>
     </div>`).join("");
+}
+
+// ── Badge Helpers ───────────────────────────
+function updateChatNavBadge() {
+  const hasUnread = [...joinedRooms.values()].some(data => data.unread);
+  const chatBtn = document.getElementById("nav-btn-chat");
+  if (!chatBtn) return;
+  
+  let badge = chatBtn.querySelector(".nav-badge-dot");
+  if (hasUnread) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "nav-badge-dot";
+      chatBtn.appendChild(badge);
+    }
+  } else {
+    badge?.remove();
+  }
+}
+
+function updateFriendsNavBadge(payload) {
+  const friendsBtn = document.getElementById("nav-btn-friends");
+  if (!friendsBtn) return;
+  const incomingCount = payload && Array.isArray(payload.incoming) ? payload.incoming.length : 0;
+  let badge = friendsBtn.querySelector(".nav-badge");
+  if (incomingCount > 0) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "nav-badge";
+      friendsBtn.appendChild(badge);
+    }
+    badge.textContent = incomingCount;
+    badge.classList.remove("hidden");
+  } else {
+    badge?.remove();
+  }
+}
+
+function updateGroupsNavBadge(payload) {
+  const groupsBtn = document.getElementById("nav-btn-groups");
+  if (!groupsBtn) return;
+  
+  // Calculate total group requests and invites
+  const invitesCount = payload && Array.isArray(payload.invites) ? payload.invites.length : 0;
+  const requestsCount = payload && Array.isArray(payload.join_requests) ? payload.join_requests.length : 0;
+  const totalCount = invitesCount + requestsCount;
+  
+  let badge = groupsBtn.querySelector(".nav-badge");
+  if (totalCount > 0) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "nav-badge";
+      groupsBtn.appendChild(badge);
+    }
+    badge.textContent = totalCount;
+    badge.classList.remove("hidden");
+  } else {
+    badge?.remove();
+  }
 }

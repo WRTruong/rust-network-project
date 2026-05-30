@@ -47,7 +47,7 @@ function joinRoom(room) {
   joinedRooms.set(room, { msgs: [], locked: savedLock.locked, passwordHash: savedLock.passwordHash });
 
   if (room.startsWith("group:")) {
-    localStorage.setItem(`group_${room}`, JSON.stringify({ id: room, timestamp: Date.now() }));
+    localStorage.setItem(`u:${username}:group_${room}`, JSON.stringify({ id: room, timestamp: Date.now() }));
   }
 
   ws.send(JSON.stringify({
@@ -80,6 +80,9 @@ function switchRoom(room) {
     return;
   }
 
+  const roomData = joinedRooms.get(room);
+  if (roomData) roomData.unread = false;
+
   const dname = displayRoomName(room);
   roomTitle.textContent = dname;
   const peerAv = document.getElementById("chat-peer-avatar");
@@ -97,6 +100,11 @@ function handleLeave() {
   ws.send(JSON.stringify({
     msg_type: "leave", username, password: "", room: currentRoom, content: "", target: "", users: []
   }));
+  
+  // Xóa khỏi localStorage cách ly của user hiện tại + legacy key
+  localStorage.removeItem(`u:${username}:group_${currentRoom}`);
+  localStorage.removeItem(`group_${currentRoom}`);
+
   joinedRooms.delete(currentRoom);
   currentRoom = null;
   roomTitle.textContent = "Select a room";
