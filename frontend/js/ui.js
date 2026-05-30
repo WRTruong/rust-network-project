@@ -182,9 +182,11 @@ function renderSidebar() {
     const lastMsg    = data.msgs[data.msgs.length - 1];
     const isLocked   = !!data.locked;
     const hasPassword= !!data.passwordHash;
-    const rawPreview = lastMsg
-      ? (lastMsg.content || (lastMsg.media ? "[file]" : ""))
-      : "Chưa có tin nhắn";
+    const rawPreview = isLocked
+      ? "🔒 Trò chuyện đã bị khóa"
+      : lastMsg
+        ? (lastMsg.content || (lastMsg.media ? "[file]" : ""))
+        : "Chưa có tin nhắn";
     const preview    = rawPreview.length > 36 ? rawPreview.slice(0, 36) + "…" : rawPreview;
     const lockIcon   = isLocked ? '<span class="lock-badge" title="Đã khoá">🔒</span> ' : hasPassword ? '<span class="lock-badge" style="opacity:.5" title="Chat được bảo vệ">🔐</span> ' : "";
     const isActive   = room === currentRoom ? "active" : "";

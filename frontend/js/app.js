@@ -358,7 +358,11 @@ function handleServerMessage(e) {
   renderSidebar();
 
   if (data.room === currentRoom) {
-    isUpdate ? renderMessages() : renderMessage(data);
+    if (isRoomLocked(currentRoom)) {
+      renderMessages();
+    } else {
+      isUpdate ? renderMessages() : renderMessage(data);
+    }
   }
 }
 
