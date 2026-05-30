@@ -355,6 +355,13 @@ function handleServerMessage(e) {
   }
 
   const isUpdate = upsertRoomMessage(data.room, data);
+  if (data.room !== currentRoom && !isUpdate && (data.msg_type === "message" || data.msg_type === "media")) {
+    const rData = joinedRooms.get(data.room);
+    if (rData) {
+      rData.unread = true;
+      playNotificationSound();
+    }
+  }
   renderSidebar();
 
   if (data.room === currentRoom) {
@@ -524,10 +531,13 @@ function detectMediaType(file) {
 
 function requestDashboardData() {
   sendAction("profile_get");
-  // Restore previously joined rooms + their lock states
+  sendAction("friends_list");
+  sendAction("groups_list");
+  // Restore previously joined rooms + their lock states for the current user only
+  const prefix = `u:${username}:group_`;
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key && key.startsWith("group_")) {
+    if (key && key.startsWith(prefix)) {
       try {
         const groupData = JSON.parse(localStorage.getItem(key));
         if (groupData && groupData.id) joinRoom(groupData.id);
@@ -602,4 +612,24 @@ function restoreAllLockStates() {
 }
 function tryParseJson(str) {
   try { return JSON.parse(str); } catch { return null; }
+}
+
+function playNotificationSound() {
+  if (localStorage.getItem("chat-sound") !== "on") return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+    osc.frequency.setValueAtTime(880.00, ctx.currentTime + 0.08); // A5
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (e) {
+    console.warn("Audio context failed:", e);
+  }
 }
