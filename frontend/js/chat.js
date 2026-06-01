@@ -28,6 +28,73 @@ function roomAvatar(room) {
   return label[0] ? label[0].toUpperCase() : "?";
 }
 
+// ── Room persistence helpers ──────────────
+function saveRoomToLocalStorage(room) {
+  if (!username) return;
+  try {
+    const key = `u:${username}:rooms`;
+    const saved = JSON.parse(localStorage.getItem(key) || "[]");
+    if (!saved.includes(room)) {
+      saved.push(room);
+      localStorage.setItem(key, JSON.stringify(saved));
+    }
+  } catch(e) {}
+}
+
+function removeRoomFromLocalStorage(room) {
+  if (!username) return;
+  try {
+    const key = `u:${username}:rooms`;
+    const saved = JSON.parse(localStorage.getItem(key) || "[]");
+    const filtered = saved.filter(r => r !== room);
+    localStorage.setItem(key, JSON.stringify(filtered));
+  } catch(e) {}
+}
+
+function getSavedRooms() {
+  if (!username) return [];
+  try {
+    // Đọc từ key mới (mảng các room)
+    const raw = localStorage.getItem(`u:${username}:rooms`);
+    if (raw) return JSON.parse(raw);
+    
+    // Migration: đọc key cũ (u:USERNAME:group_*) và trả về
+    const prefix = `u:${username}:group_`;
+    const oldRooms = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefix)) {
+        try {
+          const data = JSON.parse(localStorage.getItem(key));
+          if (data && data.id) {
+            oldRooms.push(data.id);
+            localStorage.removeItem(key); // migrate
+          }
+        } catch(e) {}
+      }
+    }
+    // Lưu vào key mới và xóa key cũ
+    if (oldRooms.length > 0) {
+      localStorage.setItem(`u:${username}:rooms`, JSON.stringify(oldRooms));
+    }
+    return oldRooms;
+  } catch(e) { return []; }
+}
+
+// ── Auto-join a room without switching (used after login) ──
+function autoJoinGroupRoom(room) {
+  if (joinedRooms.has(room)) return;
+  const savedLock = loadRoomLockState(room, typeof username !== "undefined" ? username : "");
+  joinedRooms.set(room, { msgs: [], locked: savedLock.locked, passwordHash: savedLock.passwordHash });
+  saveRoomToLocalStorage(room);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      msg_type: "join",
+      username, password: "", room, content: "", target: "", users: []
+    }));
+  }
+}
+
 // ── Room join / switch / leave ─────────────
 function joinRoom(room) {
   if (joinedRooms.has(room)) {
@@ -46,9 +113,7 @@ function joinRoom(room) {
   const savedLock = loadRoomLockState(room, typeof username !== "undefined" ? username : "");
   joinedRooms.set(room, { msgs: [], locked: savedLock.locked, passwordHash: savedLock.passwordHash });
 
-  if (room.startsWith("group:")) {
-    localStorage.setItem(`u:${username}:group_${room}`, JSON.stringify({ id: room, timestamp: Date.now() }));
-  }
+  saveRoomToLocalStorage(room);
 
   ws.send(JSON.stringify({
     msg_type: "join",
@@ -101,8 +166,8 @@ function handleLeave() {
     msg_type: "leave", username, password: "", room: currentRoom, content: "", target: "", users: []
   }));
   
-  // Xóa khỏi localStorage cách ly của user hiện tại + legacy key
-  localStorage.removeItem(`u:${username}:group_${currentRoom}`);
+  // Xóa khỏi localStorage cách ly của user hiện tại
+  removeRoomFromLocalStorage(currentRoom);
   localStorage.removeItem(`group_${currentRoom}`);
 
   joinedRooms.delete(currentRoom);

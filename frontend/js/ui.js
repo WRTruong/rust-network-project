@@ -17,6 +17,14 @@
     info:    `<svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>`,
   };
 
+  // ── Toast type theme colors ──
+  const TYPE_COLORS = {
+    success: { bg: '#e8f5e9', text: '#2e7d32', border: '#a5d6a7', icon: '#2e7d32' },
+    error:   { bg: '#ffebee', text: '#c62828', border: '#ef9a9a', icon: '#c62828' },
+    warning: { bg: '#fff8e1', text: '#f57f17', border: '#ffe082', icon: '#f57f17' },
+    info:    { bg: '#e3f2fd', text: '#1565c0', border: '#90caf9', icon: '#1565c0' },
+  };
+
   function getContainer() {
     let el = document.getElementById("toast-container");
     if (!el) {
@@ -27,25 +35,87 @@
     return el;
   }
 
+  // ── Track active toasts by key (message+type) for deduplication ──
+  window.__toastMap = window.__toastMap || new Map();
+  const MAX_TOASTS = 3;
+
   window.showToast = function(message, type = "info", duration = 4000) {
     const container = getContainer();
+    const toastKey = `${message}::${type}`;
+
+    // ── Deduplication: if same message+type exists, reset its timer ──
+    if (window.__toastMap.has(toastKey)) {
+      const existing = window.__toastMap.get(toastKey);
+      clearTimeout(existing.timer);
+      // Refresh progress bar
+      const progress = existing.el.querySelector('.toast-progress');
+      if (progress) {
+        progress.style.animation = 'none';
+        void progress.offsetHeight; // trigger reflow
+        progress.style.animation = `toastProgress ${duration}ms linear forwards`;
+      }
+      const newTimer = setTimeout(() => dismissToast(existing.el, toastKey), duration);
+      existing.timer = newTimer;
+      return existing.el;
+    }
+
+    const colors = TYPE_COLORS[type] || TYPE_COLORS.info;
+    const isDark = document.body.classList.contains("theme-dark");
+    const bg  = isDark ? '#323232' : colors.bg;
+    const clr = isDark ? '#e0e0e0' : colors.text;
+    const bdr = isDark ? '#424242' : colors.border;
+
     const toast = document.createElement("div");
-    toast.className = `toast toast-${type}`;
+    toast.className = `toast-item toast-${type}`;
+    toast.style.cssText = `background:${bg};color:${clr};border-color:${bdr};`;
     toast.innerHTML = `
-      <span class="toast-icon">${SVG[type] || SVG.info}</span>
+      <span class="toast-icon" style="color:${colors.icon};">${SVG[type] || SVG.info}</span>
       <span class="toast-text">${message}</span>
       <button class="toast-close" aria-label="close">&times;</button>
-      <div class="toast-progress" style="animation-duration:${duration}ms"></div>`;
+      <div class="toast-progress" style="animation:toastProgress ${duration}ms linear forwards;background:${colors.icon};"></div>`;
 
-    const dismiss = () => {
-      toast.classList.add("dismissing");
-      setTimeout(() => toast.remove(), 240);
-    };
-    toast.addEventListener("click", dismiss);
+    // ── Close button only (not whole toast) ──
+    const closeBtn = toast.querySelector('.toast-close');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissToast(toast, toastKey);
+    });
+
+    // ── Enforce max stack — remove oldest if at limit ──
+    const currentToasts = container.querySelectorAll('.toast-item');
+    while (currentToasts.length >= MAX_TOASTS) {
+      const oldest = container.firstElementChild;
+      if (oldest) {
+        const oldKey = findToastKey(oldest);
+        dismissToast(oldest, oldKey);
+      }
+    }
+
     container.appendChild(toast);
-    if (duration > 0) setTimeout(dismiss, duration);
+
+    // ── Track this toast ──
+    const timer = setTimeout(() => dismissToast(toast, toastKey), duration);
+    window.__toastMap.set(toastKey, { el: toast, timer });
+
     return toast;
   };
+
+  function dismissToast(el, key) {
+    if (!el || !el.parentNode) return;
+    if (key && window.__toastMap.has(key)) {
+      clearTimeout(window.__toastMap.get(key).timer);
+      window.__toastMap.delete(key);
+    }
+    el.classList.add('out');
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 250);
+  }
+
+  function findToastKey(el) {
+    for (const [key, val] of window.__toastMap) {
+      if (val.el === el) return key;
+    }
+    return null;
+  }
 
   window.showConfirm = function(message, title = "Xác nhận") {
     return new Promise(resolve => {
@@ -318,11 +388,38 @@ function refreshMessagesWithAvatar() {
   syncAllAvatars();
 }
 
+// ── Nav active state helper ────────────────
+const NAV_BTN_IDS = {
+  chat:    "nav-btn-chat",
+  friends: "nav-btn-friends",
+  groups:  "nav-btn-groups",
+  settings: null,
+  admin:   null,
+  profile: null,
+};
+
+function setNavActive(activeId) {
+  document.querySelectorAll(".nav-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.id === activeId);
+  });
+}
+
+// ── Show chat view (hide panels, activate Chat nav) ──
+function showChatView() {
+  closePanel();
+  setNavActive("nav-btn-chat");
+}
+
 // ── Panel router ──────────────────────────
 function openPanel(panel) {
   activePanel = panel;
   utilityPanel.classList.remove("hidden");
   utilityPanel.style.display = "flex";
+  
+  // Activate corresponding nav button
+  const navId = NAV_BTN_IDS[panel];
+  if (navId) setNavActive(navId);
+  
   if (panel === "profile") {
     panelTitle.textContent = "Profile";
     panelBody.innerHTML    = "<div class='panel-section'><p style='color:var(--text-sub);font-size:13px;'>Đang tải profile...</p></div>";
@@ -357,10 +454,17 @@ function handleControlMessage(data) {
   const payload = data.content ? JSON.parse(data.content) : null;
 
   if (data.msg_type === "profile_data") {
+    const oldUsername = username;
     if (payload && payload.username && username !== payload.username) username = payload.username;
     const oldAvatar = currentUserAvatar;
     if (payload && payload.avatar_url)   currentUserAvatar      = payload.avatar_url;
     if (payload && payload.display_name) currentUserDisplayName = payload.display_name;
+    // Jika username berubah (user login dengan email/phone), re-render messages agar alignment đúng
+    if (payload && payload.username && oldUsername !== payload.username) {
+      if (currentRoom && !isRoomLocked(currentRoom)) {
+        renderMessages();
+      }
+    }
     // Update avatar cache for own user
     if (username && currentUserAvatar) {
       window._avatarCache = window._avatarCache || {};
@@ -382,8 +486,20 @@ function handleControlMessage(data) {
       userGroups.clear();
       payload.forEach(g => { if (g.group_id) userGroups.set(g.group_id, g.group_name); });
     }
+    // Auto-join group rooms so they appear in the sidebar after login
+    if (payload && payload.groups && Array.isArray(payload.groups)) {
+      payload.groups.forEach(g => {
+        if (g.name) {
+          const roomId = `group:${g.name}`;
+          if (!joinedRooms.has(roomId)) {
+            autoJoinGroupRoom(roomId);
+          }
+        }
+      });
+    }
     updateGroupsNavBadge(payload);
     renderGroupsPanel(payload);
+    renderSidebar();
   }
   if (data.msg_type === "admin_users_data") renderAdminPanel(payload);
   return true;
@@ -562,24 +678,49 @@ function renderSettingsPanel() {
   const theme = localStorage.getItem("chat-theme") || "light";
   const sound = localStorage.getItem("chat-sound") || "off";
   panelBody.innerHTML = `
-    <div class="panel-section">
-      <h4>GIAO DIỆN</h4>
+    <!-- Section: Giao diện -->
+    <div class="panel-section settings-section">
+      <div class="settings-section-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style="flex-shrink:0;opacity:.7;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-.5-13v4h-2v2h2v4h2v-4h2v-2h-2V7h-2z"/></svg>
+        <span>Giao diện</span>
+      </div>
       <label>Chủ đề màu sắc</label>
-      <div style="display:flex;gap:8px;margin-top:6px;">
+      <div style="display:flex;gap:8px;margin-top:2px;">
         <button onclick="setTheme('light')" class="theme-toggle-btn ${theme === 'light' ? 'active' : ''}">☀️ Light</button>
         <button onclick="setTheme('dark')"  class="theme-toggle-btn ${theme === 'dark'  ? 'active' : ''}">🌙 Dark</button>
       </div>
-      <label style="margin-top:10px;">Âm thanh thông báo</label>
+      <label style="margin-top:8px;">Âm thanh thông báo</label>
       <select id="setting-sound" onchange="saveUiSettings()">
         <option value="off" ${sound === "off" ? "selected" : ""}>Tắt âm thanh</option>
         <option value="on"  ${sound === "on"  ? "selected" : ""}>Bật âm thanh</option>
       </select>
     </div>
-    <div class="panel-section">
-      <h4>ĐỔI MẬT KHẨU</h4>
+
+    <hr class="settings-divider">
+
+    <!-- Section: Đổi mật khẩu -->
+    <div class="panel-section settings-section">
+      <div class="settings-section-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style="flex-shrink:0;opacity:.7;"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+        <span>Đổi mật khẩu</span>
+      </div>
       <input id="old-password" type="password" placeholder="Mật khẩu hiện tại">
       <input id="new-password" type="password" placeholder="Mật khẩu mới">
-      <button onclick="changePassword()">Cập nhật mật khẩu</button>
+      <button onclick="changePassword()" class="settings-btn-password">Cập nhật mật khẩu</button>
+    </div>
+
+    <hr class="settings-divider">
+
+    <!-- Section: Thông tin ứng dụng -->
+    <div class="panel-section settings-section" style="opacity:.7;">
+      <div class="settings-section-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" style="flex-shrink:0;opacity:.7;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        <span>Thông tin</span>
+      </div>
+      <div style="font-size:13px;color:var(--text-sub);line-height:1.6;">
+        <div style="display:flex;justify-content:space-between;"><span>Phiên bản</span><span style="font-weight:500;">1.0.0</span></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;"><span>Nền tảng</span><span style="font-weight:500;">WebSocket + Rust</span></div>
+      </div>
     </div>`;
 }
 
