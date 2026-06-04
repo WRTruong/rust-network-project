@@ -268,7 +268,7 @@ function renderSidebar() {
     const unreadClass= data.unread ? "unread" : "";
 
     return `
-      <div class="room-item ${isActive} ${unreadClass}" onclick="switchRoom('${room}')">
+      <div class="room-item ${isActive} ${unreadClass}" onclick="_attemptSwitchRoom('${room}')">
         <div class="room-avatar">${initial}</div>
         <div class="room-info">
           <div class="room-name">${lockIcon}${escapeHtml(displayRoomName(room))}</div>
@@ -455,12 +455,21 @@ function handleControlMessage(data) {
 
   if (data.msg_type === "profile_data") {
     const oldUsername = username;
-    if (payload && payload.username && username !== payload.username) username = payload.username;
+    const usernameChanged = payload && payload.username && username !== payload.username;
+    if (payload && payload.username && usernameChanged) username = payload.username;
     const oldAvatar = currentUserAvatar;
     if (payload && payload.avatar_url)   currentUserAvatar      = payload.avatar_url;
     if (payload && payload.display_name) currentUserDisplayName = payload.display_name;
+    // Nếu username thay đổi (user login bằng email/phone), re-restore rooms và lock states
+    if (usernameChanged) {
+      const savedRooms = typeof getSavedRooms === "function" ? getSavedRooms() : [];
+      savedRooms.forEach(id => {
+        if (!joinedRooms.has(id) && typeof joinRoom === "function") joinRoom(id);
+      });
+      if (typeof restoreAllLockStates === "function") restoreAllLockStates();
+    }
     // Jika username berubah (user login dengan email/phone), re-render messages agar alignment đúng
-    if (payload && payload.username && oldUsername !== payload.username) {
+    if (usernameChanged) {
       if (currentRoom && !isRoomLocked(currentRoom)) {
         renderMessages();
       }

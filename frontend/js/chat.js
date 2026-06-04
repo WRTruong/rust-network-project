@@ -213,10 +213,17 @@ function loadRoomLockState(room, forUser) {
     const raw    = localStorage.getItem(newKey);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return {
-        locked:       !!parsed.locked,
-        passwordHash: typeof parsed.passwordHash === "string" ? parsed.passwordHash : ""
-      };
+      const locked = !!parsed.locked;
+      const passwordHash = typeof parsed.passwordHash === "string" ? parsed.passwordHash : "";
+      
+      // Private chat: nếu persistUnlock được set và room đang unlock, giữ nguyên trạng thái
+      // Ưu tiên persistUnlock hơn locked field để đảm bảo unlock không bị mất sau login lại
+      const persistUnlock = !!parsed.persistUnlock;
+      if (isPrivateRoom(room) && persistUnlock && !locked && passwordHash) {
+        return { locked: false, passwordHash };
+      }
+      
+      return { locked, passwordHash };
     }
     // Migration: thử key cũ (không có username)
     const oldKey = `chat_lock_${String(room || "").trim().toLowerCase()}`;
@@ -227,9 +234,14 @@ function loadRoomLockState(room, forUser) {
         locked:       !!parsed.locked,
         passwordHash: typeof parsed.passwordHash === "string" ? parsed.passwordHash : ""
       };
-      // Migrate sang key mới và xóa key cũ
+      // Migrate sang key mới và xóa key cũ — kèm persistUnlock cho private chat
       if (state.passwordHash && forUser) {
-        localStorage.setItem(newKey, JSON.stringify(state));
+        const isPrivateUnlock = isPrivateRoom(room) && !state.locked && state.passwordHash;
+        localStorage.setItem(newKey, JSON.stringify({
+          locked:          state.locked,
+          passwordHash:    state.passwordHash,
+          persistUnlock:   isPrivateUnlock || false
+        }));
         localStorage.removeItem(oldKey);
       }
       return state;
@@ -249,9 +261,14 @@ function saveRoomLockState(room, state) {
     localStorage.removeItem(key);
     return;
   }
+  
+  // persistUnlock: đánh dấu rằng user đã chủ động mở khóa private chat này
+  // Giúp restore đúng trạng thái sau logout/login (chỉ áp dụng cho private chat)
+  const isPrivateUnlock = isPrivateRoom(room) && !state.locked && state.passwordHash;
   localStorage.setItem(key, JSON.stringify({
-    locked:       !!state.locked,
-    passwordHash: state.passwordHash
+    locked:          !!state.locked,
+    passwordHash:    state.passwordHash,
+    persistUnlock:   isPrivateUnlock || false
   }));
 }
 

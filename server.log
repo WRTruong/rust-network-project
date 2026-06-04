@@ -1,0 +1,38 @@
+    Blocking waiting for file lock on artifact directory
+warning: methods `get_message` and `can_modify_message` are never used
+  --> src\chat\message_store.rs:78:18
+   |
+11 | impl MessageStore {
+   | ----------------- methods in this implementation
+...
+78 |     pub async fn get_message(&self, message_id: &str) -> Option<ChatMessage> {
+   |                  ^^^^^^^^^^^
+...
+94 |     pub async fn can_modify_message(&self, message_id: &str, username: &str) -> bool {
+   |                  ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `update_profile` is never used
+   --> src\auth.rs:113:14
+    |
+113 | pub async fn update_profile(
+    |              ^^^^^^^^^^^^^^
+
+warning: function `get_user_profile` is never used
+   --> src\auth.rs:135:14
+    |
+135 | pub async fn get_user_profile(
+    |              ^^^^^^^^^^^^^^^^
+
+warning: `rust-network-project` (bin "rust-network-project") generated 3 warnings
+    Finished `release` profile [optimized] target(s) in 33.97s
+     Running `target\release\rust-network-project.exe`
+DB config: host=LAPTOP-E3ETC2TU port=1433
+Starting Rust Chat Server...
+Connecting to SQL Server at LAPTOP-E3ETC2TU...
+Creating database ChatDB if not exists...
+Setting up schema in ChatDB...
+Database initialized successfully!
+Port 3000 is already in use, trying next port
+Server running at ws://127.0.0.1:3001

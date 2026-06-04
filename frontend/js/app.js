@@ -547,14 +547,15 @@ function requestDashboardData() {
   });
   // Restore lock states — delay để đảm bảo profile_get đã xử lý xong
   // Gọi sau khi username đã được set từ profile_get response (~400ms)
-  setTimeout(() => {
-    if (username) {
+  const tryRestoreLockStates = () => {
+    if (username && typeof restoreAllLockStates === "function") {
       restoreAllLockStates();
     } else {
-      // Thử lại nếu username chưa có
-      setTimeout(restoreAllLockStates, 800);
+      // Thử lại nếu username chưa có (login bằng email/phone)
+      setTimeout(tryRestoreLockStates, 600);
     }
-  }, 400);
+  };
+  setTimeout(tryRestoreLockStates, 400);
 }
 
 function restoreAllLockStates() {
