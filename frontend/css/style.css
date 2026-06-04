@@ -279,21 +279,21 @@ body.theme-dark .field-error {
 }
 
 
-/* ── COL 1: Icon Nav (64px) ── */
+/* ── COL 1: Icon Nav (68px) ── */
 .icon-nav {
   width:68px; flex-shrink:0;
   background:var(--nav-bg);
   border-right:1px solid var(--border);
   display:flex; flex-direction:column;
   align-items:center;
-  padding:14px 0 12px;
-  gap:6px;
+  padding:14px 0 10px;
+  gap:4px;
   box-shadow:var(--shadow-sm);
   z-index:10;
   transition:background var(--transition);
 }
 
-.nav-avatar-wrap { position:relative; cursor:pointer; margin-bottom:6px; }
+.nav-avatar-wrap { position:relative; cursor:pointer; margin-bottom:4px; }
 .nav-avatar {
   width:42px; height:42px; border-radius:50%;
   background:linear-gradient(135deg,var(--accent),#6f42c1);
@@ -315,25 +315,84 @@ body.theme-dark .field-error {
   transition:border-color var(--transition);
 }
 
-.nav-divider { width:36px; height:1.5px; background:var(--border); border-radius:1px; margin:4px 0; }
+.nav-divider { width:36px; height:1.5px; background:var(--border); border-radius:1px; margin:6px 0 4px; }
 .nav-spacer  { flex:1; }
 
+/* ── Nav Buttons ── */
 .nav-btn {
-  width:42px; height:42px; border-radius:var(--radius-sm);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:3px;
+  width:52px; min-height:46px;
+  padding:6px 0;
+  border-radius:10px;
   color:var(--text-sub);
-  display:flex; align-items:center; justify-content:center;
-  transition:background var(--transition), color var(--transition), border-radius var(--spring);
+  opacity:.55;
+  transition:opacity .2s ease, background .2s ease, color .2s ease, border-radius .2s;
   position:relative;
+  border:none; cursor:pointer; background:transparent;
+  flex-shrink:0;
 }
-.nav-btn:hover  { background:var(--surface2); color:var(--text); border-radius:var(--radius); }
-.nav-btn.active { background:var(--accent-soft); color:var(--accent); border-radius:var(--radius); }
-.nav-btn-danger:hover { background:#fff0f0; color:var(--danger); }
+
+/* Hover — light highlight, brighter */
+.nav-btn:hover {
+  background:var(--surface2);
+  opacity:.80;
+  border-radius:10px;
+}
+body.theme-dark .nav-btn:hover {
+  background:rgba(255,255,255,.06);
+}
+
+/* Active — accent blue, strong bg, left indicator bar */
+.nav-btn.active {
+  background:var(--accent-soft);
+  color:var(--accent);
+  opacity:1;
+  border-radius:10px;
+}
+body.theme-dark .nav-btn.active {
+  background:rgba(45,136,255,.15);
+}
+
+/* 3px vertical accent bar on the left (Discord style) */
+.nav-btn.active::before {
+  content:'';
+  position:absolute;
+  left:-11px;
+  top:50%;
+  transform:translateY(-50%);
+  width:3px;
+  height:20px;
+  background:var(--accent);
+  border-radius:0 3px 3px 0;
+  transition:height .2s ease;
+}
+
+.nav-btn-danger:hover { background:#fff0f0; color:var(--danger); opacity:1 !important; }
 body.theme-dark .nav-btn-danger:hover { background:rgba(250,62,62,.15); color:#f87171; }
 
-/* Active indicator dot */
-.nav-btn.active::after {
-  content:''; position:absolute; left:-8px; top:50%; transform:translateY(-50%);
-  width:4px; height:20px; background:var(--accent); border-radius:2px;
+/* ── Nav label (shown only when active) ── */
+.nav-label {
+  display:none;
+  font-size:8px;
+  font-weight:700;
+  letter-spacing:.02em;
+  line-height:1;
+  text-transform:uppercase;
+  color:inherit;
+  max-width:52px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.nav-btn.active .nav-label {
+  display:block;
+}
+
+/* Utility buttons (Settings, Admin, Logout) — keep visible */
+.nav-btn-danger,
+.nav-btn.nav-btn-util {
+  opacity:.8;
 }
 
 
@@ -929,25 +988,84 @@ body.theme-dark .panel-section {
    TOAST NOTIFICATIONS
 ═══════════════════════════════════════════ */
 #toast-container {
-  position:fixed; top:20px; right:20px; z-index:9999;
-  display:flex; flex-direction:column; gap:10px;
+  position:fixed; top:20px; right:20px; z-index:100000 !important;
+  display:flex; flex-direction:column; gap:8px;
   pointer-events:none;
+  max-width:min(380px, calc(100vw - 40px));
 }
 
 .toast-item {
   display:flex; align-items:flex-start; gap:10px;
-  padding:13px 16px;
+  padding:14px 16px;
   border-radius:var(--radius);
-  box-shadow:var(--shadow-lg);
-  pointer-events:all; cursor:pointer;
-  min-width:240px; max-width:340px;
+  box-shadow:0 8px 32px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.1);
+  pointer-events:all;
+  min-width:260px; max-width:380px;
   border:1px solid;
-  backdrop-filter:blur(12px);
-  animation:toastIn .28s cubic-bezier(.34,1.56,.64,1) both;
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
+  animation:toastIn .30s cubic-bezier(.34,1.56,.64,1) both;
+  position:relative;
+  overflow:hidden;
+  font-family:var(--font-body);
+  cursor:default;
 }
-@keyframes toastIn { from { opacity:0; transform:translateX(30px) scale(.95); } }
-.toast-item.out { animation:toastOut .22s ease forwards; }
-@keyframes toastOut { to { opacity:0; transform:translateX(30px) scale(.95); } }
+@keyframes toastIn { 
+  0% { opacity:0; transform:translateX(40px) scale(.92); }
+  100% { opacity:1; transform:translateX(0) scale(1); }
+}
+.toast-item.out { 
+  animation:toastOut .22s ease forwards; 
+  pointer-events:none !important;
+}
+@keyframes toastOut { 
+  to { opacity:0; transform:translateX(40px) scale(.92); } 
+}
+
+.toast-item .toast-icon {
+  flex-shrink:0;
+  width:20px; height:20px;
+  display:flex; align-items:center; justify-content:center;
+  margin-top:1px;
+}
+.toast-item .toast-text {
+  flex:1; font-size:14px; font-weight:500;
+  line-height:1.45; word-break:break-word;
+}
+.toast-item .toast-close {
+  flex-shrink:0;
+  width:22px; height:22px; border-radius:50%;
+  border:none; background:rgba(0,0,0,.08);
+  color:inherit; opacity:.6;
+  display:flex; align-items:center; justify-content:center;
+  font-size:15px; line-height:1;
+  cursor:pointer;
+  transition:opacity .15s, background .15s, transform .15s;
+  margin-top:-1px;
+}
+.toast-item .toast-close:hover {
+  opacity:1;
+  background:rgba(0,0,0,.15);
+  transform:scale(1.12);
+}
+body.theme-dark .toast-item .toast-close {
+  background:rgba(255,255,255,.12);
+}
+body.theme-dark .toast-item .toast-close:hover {
+  background:rgba(255,255,255,.2);
+}
+
+.toast-item .toast-progress {
+  position:absolute;
+  bottom:0; left:0;
+  height:3px;
+  border-radius:0 2px 2px 0;
+  opacity:.5;
+}
+@keyframes toastProgress {
+  from { width:100%; }
+  to { width:0%; }
+}
 
 /* Responsive */
 @media (max-width:900px) { .activity-panel { display:none; } }
@@ -1129,6 +1247,45 @@ body.theme-dark .msg-group.own .msg-actions .msg-action-delete { background: rgb
 }
 
 .theme-toast { font-family: var(--font-body, system-ui); }
+
+/* ── Settings Panel enhancements ── */
+.settings-section {
+  padding: 18px;
+  gap: 8px;
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+  font-family: var(--font-ui);
+}
+
+.settings-divider {
+  border: none;
+  height: 1.5px;
+  background: var(--border-solid);
+  border-radius: 1px;
+  margin: 2px 0;
+  opacity: .6;
+}
+
+.settings-btn-password {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3) !important;
+}
+.settings-btn-password:hover {
+  opacity: .92 !important;
+}
+
+/* Mỗi panel-section trong settings cách nhau rõ */
+.activity-body:has(.settings-section) {
+  gap: 8px;
+}
 
 /* ── Theme switch toast animation ── */
 @keyframes themeSpin {

@@ -340,7 +340,14 @@ function handleServerMessage(e) {
     return;
   }
 
-  if (!joinedRooms.has(data.room)) joinedRooms.set(data.room, { msgs: [] });
+  if (!joinedRooms.has(data.room)) {
+    const savedLock = loadRoomLockState(data.room, typeof username !== "undefined" ? username : "");
+    joinedRooms.set(data.room, { msgs: [], locked: savedLock.locked, passwordHash: savedLock.passwordHash });
+    // Lưu room vào localStorage để persist sau login lại — kể cả private chat rooms
+    if (typeof saveRoomToLocalStorage === "function") {
+      saveRoomToLocalStorage(data.room);
+    }
+  }
 
   // Nếu message có kèm avatar_url của sender — cache lại ngay
   if (data.username && data.avatar_url) {
@@ -533,17 +540,11 @@ function requestDashboardData() {
   sendAction("profile_get");
   sendAction("friends_list");
   sendAction("groups_list");
-  // Restore previously joined rooms + their lock states for the current user only
-  const prefix = `u:${username}:group_`;
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key && key.startsWith(prefix)) {
-      try {
-        const groupData = JSON.parse(localStorage.getItem(key));
-        if (groupData && groupData.id) joinRoom(groupData.id);
-      } catch(e) {}
-    }
-  }
+  // Restore previously joined rooms (cả group lẫn private chat) cho user hiện tại
+  const savedRooms = typeof getSavedRooms === "function" ? getSavedRooms() : [];
+  savedRooms.forEach(id => {
+    if (!joinedRooms.has(id)) joinRoom(id);
+  });
   // Restore lock states — delay để đảm bảo profile_get đã xử lý xong
   // Gọi sau khi username đã được set từ profile_get response (~400ms)
   setTimeout(() => {
